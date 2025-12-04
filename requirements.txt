@@ -9,3 +9,4 @@ matplotlib
 requests
 editdistance
 scikit-learn
+fastapi
