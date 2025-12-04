@@ -333,5 +333,5 @@ def train_ocr_model():
 
 if __name__ == "__main__":
     # เลือกได้ว่าจะรันอะไร
-    train_province_model()
+    # train_province_model()
     train_ocr_model()
