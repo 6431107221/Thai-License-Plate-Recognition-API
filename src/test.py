@@ -60,25 +60,26 @@ def main():
         int_to_char = json.load(f)
     
     # 2. Load Models
-    print("Loading models...")
-    
     # --- OCR Model ---
-    # num_classes ต้องเท่ากับ len(int_to_char)
     ocr_model = ResNetCRNN(1, len(int_to_char), hidden_size=256, num_rnn_layers=2).to(DEVICE)
     
     if OCR_MODEL_PATH.exists():
-        print(f" Loading OCR model from {OCR_MODEL_PATH}...")
+        print(f" Loading existing OCR model from {OCR_MODEL_PATH}...")
         try:
-            ckpt = torch.load(OCR_MODEL_PATH, map_location=DEVICE)
-            # รองรับทั้งแบบที่ save state_dict โดยตรง หรือ save เป็น dict ใหญ่
-            if "model_state_dict" in ckpt:
-                ocr_model.load_state_dict(ckpt["model_state_dict"])
-            else:
-                ocr_model.load_state_dict(ckpt)
-            ocr_model.eval()
+            # 1. โหลด Checkpoint (พร้อม weights_only=True เพื่อความปลอดภัย)
+            ckpt = torch.load(OCR_MODEL_PATH, map_location=DEVICE, weights_only=True) 
+            
+            # 2. ดึง State Dict (OCR Model ถูกบันทึกด้วย Key: "model_state_dict")
+            state_dict = ckpt["model_state_dict"]
+            
+            ocr_model.load_state_dict(state_dict) 
+            
+            ocr_model.eval() 
+            print("  Model loaded successfully!")
+            
         except Exception as e:
-            print(f"Failed to load OCR model: {e}")
-            return
+            print(f"  Load failed: {e}. Skipping OCR inference.")
+            return 
     else:
         print(f"Error: OCR model not found at {OCR_MODEL_PATH}")
         return
@@ -89,25 +90,37 @@ def main():
     if PROV_MODEL_PATH.exists():
         print(f" Loading Province model from {PROV_MODEL_PATH}...")
         try:
-            ckpt = torch.load(PROV_MODEL_PATH, map_location=DEVICE)
+            ckpt = torch.load(PROV_MODEL_PATH, map_location=DEVICE, weights_only=True)
             
-            # ดึง Class Map ออกมาจาก Checkpoint
+            # 1. ดึง Class Map
             if "class_map" in ckpt:
                 prov_idx2prov = ckpt["class_map"]
-                # แปลง Key จาก int เป็น str เพื่อความชัวร์ (หรือกลับกันตามการใช้งาน)
                 prov_idx2prov = {int(k):v for k,v in prov_idx2prov.items()}
             else:
                 print("Warning: 'class_map' not found in province checkpoint.")
                 return
 
-            # Init Model ด้วยจำนวน Class ที่ถูกต้อง
+            # 2. Init Model
             prov_model = ProvinceClassifier(len(prov_idx2prov)).to(DEVICE)
             
+            # 3. ดึง State Dict
             if "model_state" in ckpt:
-                prov_model.load_state_dict(ckpt["model_state"])
+                state_dict = ckpt["model_state"]
             else:
-                prov_model.load_state_dict(ckpt)
+                state_dict = ckpt # กรณี save แบบทั้งก้อน
+            
+            # 🌟 4. FIX: เพิ่ม Key Adaptation (เติม model. นำหน้า) 🌟
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if not k.startswith("model."):
+                    new_state_dict[f"model.{k}"] = v
+                else:
+                    new_state_dict[k] = v
+            
+            # โหลดด้วย dict ใหม่
+            prov_model.load_state_dict(new_state_dict)
             prov_model.eval()
+            print(" Province Model loaded successfully!")
             
         except Exception as e:
             print(f"Failed to load Province model: {e}")
