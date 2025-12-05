@@ -11,8 +11,8 @@ import torchvision.transforms as T
 from inference_sdk import InferenceHTTPClient
 
 # Import Local Modules
-from models import ResNetCRNN, ProvinceClassifier
-from utils import beam_search_decode
+from src.models import ResNetCRNN, ProvinceClassifier
+from src.utils import beam_search_decode
 
 app = FastAPI()
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
