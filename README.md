@@ -45,8 +45,7 @@
  
 ```bash
 docker build -t asia-southeast1-docker.pkg.dev/[PROJECT_ID]/ocr-api-repo/ocr-api-image:latest .
-
-
+```
 ### 2. การ Deploy ไปยัง Google Cloud Run (GCP)
 
 หลังจากยืนยันสิทธิ์ gcloud auth configure-docker แล้ว สามารถ Deploy Image ไปยัง GCP Cloud Run ได้ทันที
