@@ -1,5 +1,6 @@
-#--index-url https://download.pytorch.org/whl/cu121 
---index-url https://download.pytorch.org/whl/cu118
+# กำหนด Extra Indexes URLs ที่จำเป็นสำหรับการค้นหา
+--extra-index-url https://download.pytorch.org/whl/cu118
+--extra-index-url https://pypi.org/simple
 
 torch
 torchvision

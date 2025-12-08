@@ -20,12 +20,11 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"\nUsing device: {DEVICE}")
 
 CROPS_ROOT = Path("crops_all")
-# ปรับลด Batch Size ตามความเหมาะสมของ GPU
 BATCH_SIZE_PROV = 32   
 BATCH_SIZE_OCR = 32
 EPOCHS = 50
 EARLY_STOP = 15
-NUM_WORKERS = 0 # Windows แนะนำเป็น 0 เพื่อความเสถียร
+NUM_WORKERS = 0 
 
 TRAIN_UNIFIED = CROPS_ROOT / "train" / "train_unified.csv"
 VAL_UNIFIED   = CROPS_ROOT / "valid" / "val_unified.csv"
@@ -45,7 +44,7 @@ def filter_existing_provinces(df, root):
 def train_province_model():
     print("\n--- Start Training Province Model ---")
     
-    # 1. Load & Prepare Data
+    # 1. Load Data (CSV)
     if not TRAIN_UNIFIED.exists(): 
         print(f"Error: Unified CSV not found at {TRAIN_UNIFIED}. Run preprocess.py first.")
         return
@@ -58,62 +57,77 @@ def train_province_model():
     
     train_df = filter_existing_provinces(train_df_raw, CROPS_ROOT)
     val_df = filter_existing_provinces(val_df_raw, CROPS_ROOT)
-
     print(f"Train samples: {len(train_df_raw)} -> {len(train_df)}")
 
-    train_ds = ProvinceDataset(train_df, CROPS_ROOT, training=True)
+    # ============================================================
+    # 🌟 Load Class Map จากโมเดลเก่า 🌟
+    # ============================================================
+    forced_map = None
+    LOAD_PATH = Path("ocr_minimal/province_best.pth") # โมเดลต้นฉบับ
+    
+    if LOAD_PATH.exists():
+        print(f" Reading class map from {LOAD_PATH} to ensure consistency...")
+        try:
+            # FIX: เพิ่ม weights_only=False แก้ Warning
+            ckpt = torch.load(LOAD_PATH, map_location=DEVICE, weights_only=False)
+            if "class_map" in ckpt:
+                saved_i2p = ckpt["class_map"]
+                forced_map = {v: int(k) for k, v in saved_i2p.items()}
+                print(f"  Loaded class map with {len(forced_map)} classes.")
+        except Exception as e:
+            print(f"  Failed to load class map: {e}")
+
+    # 2. Create Dataset
+    train_ds = ProvinceDataset(train_df, CROPS_ROOT, class_map=forced_map, training=True)
     val_ds = ProvinceDataset(val_df, CROPS_ROOT, class_map=train_ds.p2i, training=False)
     
-    # Check CUDA for pin_memory
     is_cuda = (DEVICE.type == 'cuda')
-    
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE_PROV, shuffle=True, 
                               num_workers=NUM_WORKERS, pin_memory=is_cuda)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE_PROV, shuffle=False, 
                             num_workers=NUM_WORKERS, pin_memory=is_cuda)
 
-    # 2. Weights Setup (แก้ปัญหา Class Imbalance)
+    # 3. Weights Setup
     master_map = train_ds.p2i
     all_labels = [master_map.get(row["gt_province"], 0) for _, row in train_df.iterrows()]
     class_counts = np.bincount(all_labels, minlength=len(master_map))
-    class_counts = np.where(class_counts == 0, 1, class_counts) # ป้องกันหารด้วย 0
+    class_counts = np.where(class_counts == 0, 1, class_counts)
     total_samples = len(all_labels)
     n_classes = len(master_map)
     
     class_weights = total_samples / (n_classes * class_counts)
-    class_weights = np.clip(class_weights, 1.0, 10.0) # Clip ค่าไม่ให้เหวี่ยงเกินไป
+    class_weights = np.clip(class_weights, 1.0, 10.0)
     class_weights = torch.FloatTensor(class_weights).to(DEVICE)
     print(f"Class Weights configured. Total Classes: {n_classes}")
 
-    # 3. Model Setup
+    # 4. Model Setup
     model = ProvinceClassifier(len(train_ds.p2i)).to(DEVICE)
     best_f1 = 0.0
     patience_counter = 0
-    start_epoch = 1
 
-    # โหลด Checkpoint
-    if Path("ocr_minimal/province_best.pth").exists():
-        print(" Loading existing province model...")
+    # Load Weights
+    if LOAD_PATH.exists():
+        print(" Loading existing province weights...")
         try:
-            ckpt = torch.load("ocr_minimal/province_best.pth", map_location=DEVICE, weights_only=True)
-            
-            # Load Model Weights (พร้อมแก้ Key ถ้าจำเป็น)
+            # FIX: เพิ่ม weights_only=False แก้ Warning
+            ckpt = torch.load(LOAD_PATH, map_location=DEVICE, weights_only=False)
             state_dict = ckpt["model_state"]
             new_state_dict = {}
             for k, v in state_dict.items():
-                if not k.startswith("model."):
-                    new_state_dict[f"model.{k}"] = v 
-                else:
-                    new_state_dict[k] = v
+                if not k.startswith("model."): new_state_dict[f"model.{k}"] = v 
+                else: new_state_dict[k] = v
             model.load_state_dict(new_state_dict)
             
+            if "best_f1" in ckpt: best_f1 = ckpt["best_f1"]
+            print(f"  Model weights loaded! Resuming with Best F1: {best_f1:.4f}")
         except Exception as e:
-            print(f"  Load failed (Starting fresh): {e}")
+            print(f"  Load weights failed: {e}")
 
     # Optimizer & Loss
-    optimizer = optim.AdamW(model.parameters(), lr=5e-6, weight_decay=2e-2) # ใช้ LR ต่ำสำหรับ Fine-tuning
+    # FIX: ลด LR เหลือ 1e-5 เพื่อ Fine-tuning ไม่ให้ weight เก่าพัง
+    optimizer = optim.AdamW(model.parameters(), lr=1e-5, weight_decay=1e-4) 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=4, factor=0.5)
-    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1) # ใช้ Weight ที่คำนวณไว้
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
     scaler = torch.amp.GradScaler('cuda', enabled=is_cuda)
 
     # 4. Training Loop
@@ -138,6 +152,15 @@ def train_province_model():
     for ep in range(EPOCHS):
         model.train()
         train_ds.training = True
+
+        # ========================================================
+        # 🔥 FIX: FREEZE BATCH NORM (แก้ปัญหา F1 ร่วงตรงนี้) 🔥
+        # ========================================================
+        # บังคับให้ Layer BatchNorm ใช้ค่า stat เดิม (ไม่คำนวณใหม่จากข้อมูลน้อยๆ)
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                module.eval()
+        # ========================================================
 
         loss_sum = 0.0; correct = 0; total = 0
 
@@ -191,15 +214,15 @@ def train_province_model():
         else:
             patience_counter += 1
             if patience_counter >= EARLY_STOP:
+                # Save latest state anyway
                 torch.save({"model_state": model.state_dict(), "class_map": train_ds.i2p}, "ocr_train_out/province_best.pth") 
                 print("Early Stopping. Saving latest model state before exit.")
                 break
 
-# --- 2. OCR Training ---
+# --- 2. OCR Training (Code เดิม) ---
 def train_ocr_model():
     print("\n--- Start Training OCR Model ---")
     
-    # 1. Load Char Map
     json_path = Path("ocr_minimal/int_to_char.json")
     if not json_path.exists():
         print(f"Error: {json_path} not found.")
@@ -209,7 +232,6 @@ def train_ocr_model():
         int_to_char = json.load(f)
     char_to_int = {v: int(k) for k, v in int_to_char.items()}
 
-    # 2. Prepare Data
     if not TRAIN_UNIFIED.exists(): 
         print(f"Error: Unified CSV not found at {TRAIN_UNIFIED}. Run preprocess.py first.")
         return
@@ -229,36 +251,27 @@ def train_ocr_model():
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE_OCR, collate_fn=ocr_collate, 
                             num_workers=NUM_WORKERS, pin_memory=is_cuda)
 
-    # 3. Model Setup
     model = ResNetCRNN(1, len(int_to_char), hidden_size=256, num_rnn_layers=2).to(DEVICE)
     
-    # Load Pretrained
     OCR_PRETRAINED_PATH = Path("ocr_minimal/best_model.pth")
     OCR_SAVE_PATH = Path("ocr_train_out/best_model.pth")
     
-    # ถ้ามีไฟล์ Pre-trained เก่า (จาก ocr_minimal/ ที่โหลดมา)
     if OCR_PRETRAINED_PATH.exists():
         print(f" Loading existing OCR model from {OCR_PRETRAINED_PATH}...")
         try:
-            ckpt = torch.load(OCR_PRETRAINED_PATH, map_location=DEVICE,weights_only=True)
-            
-            # OCR Model ถูกบันทึกด้วย Key: "model_state_dict" ใน Colab
+            ckpt = torch.load(OCR_PRETRAINED_PATH, map_location=DEVICE, weights_only=True)
             model.load_state_dict(ckpt["model_state_dict"])
             print(" Model loaded successfully!")
         except Exception as e:
-            # ถ้าโหลดไม่ได้ อาจเป็นเพราะ Key ไม่ตรง (เช่น ไม่มี 'model_state_dict') หรือไฟล์เสีย
             print(f" Failed to load model: {e}. Training from scratch.")
 
-    # Optimizer & Loss
-    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=5e-5, weight_decay=5e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
     criterion = nn.CTCLoss(blank=0, zero_infinity=True)
     scaler = torch.amp.GradScaler('cuda', enabled=is_cuda)
 
-    # 4. Training Loop
     best_val_cer = 1.0
     
-    # Baseline Check
     print("Checking baseline performance...")
     model.eval()
     cer_sum = 0; tot = 0
@@ -276,7 +289,7 @@ def train_ocr_model():
                 tot += 1; idx += int(L)
     val_cer = cer_sum / max(1, tot)
     print(f"Baseline CER: {val_cer:.4f}")
-    if val_cer < 1.0: best_val_cer = val_cer # Update baseline if reasonable
+    if val_cer < 1.0: best_val_cer = val_cer
 
     for epoch in range(1, EPOCHS+1):
         model.train()
@@ -289,23 +302,22 @@ def train_ocr_model():
             
             optimizer.zero_grad()
             with torch.amp.autocast('cuda', enabled=is_cuda):
-                out = model(imgs) # [B, T, C]
+                out = model(imgs) 
                 logp = out.log_softmax(-1)
-                logp_loss = logp.permute(1, 0, 2) # [T, B, C]
+                logp_loss = logp.permute(1, 0, 2)
                 
                 input_lengths = torch.full((imgs.size(0),), out.size(1), dtype=torch.long).to(DEVICE)
                 loss = criterion(logp_loss, tg, input_lengths, tg_lens)
             
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0) # Gradient Clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0) 
             scaler.step(optimizer)
             scaler.update()
             
             total_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.4f}")
         
-        # Validation
         model.eval()
         cer_sum = 0; tot = 0
         with torch.no_grad():
@@ -327,7 +339,6 @@ def train_ocr_model():
 
         scheduler.step(val_cer)
 
-        # Save Best Model
         if val_cer < best_val_cer:
             best_val_cer = val_cer
             Path("ocr_train_out").mkdir(parents=True, exist_ok=True)
@@ -340,6 +351,5 @@ def train_ocr_model():
             print(f">> Saved New Best Model (CER: {val_cer:.4f})")
 
 if __name__ == "__main__":
-    # เลือกได้ว่าจะรันอะไร
     train_province_model()
-    #train_ocr_model()
+    train_ocr_model()
