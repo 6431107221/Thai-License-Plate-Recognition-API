@@ -10,9 +10,9 @@
  
 ### จุดเด่นทางเทคนิคที่สำคัญ (Key Technical Highlights)
  
+* **Two-Tier Detection:** ใช้ **Roboflow 3.0 Object Detection** ในการหาป้ายทะเบียน และใช้ **RF-DETR (Medium)** ในการแยกตัวอักษรและจังหวัดเพื่อ Segmentation
 * **Custom Deep Learning:** พัฒนาโมเดล **CRNN** คู่กับ **CTC Loss** สำหรับการรู้จำตัวอักษรภาษาไทยโดยเฉพาะ
-* **Containerization:** ใช้ **Docker** ในการจัดการสภาพแวดล้อมที่ซับซ้อน (PyTorch, FastAPI, OpenCV)
-* **Serverless Deployment:** นำไป Deploy บน **Google Cloud Run (GCP)** เพื่อความยืดหยุ่นและการจัดการโหลดอัตโนมัติ
+* **Containerization & Deployment:** ใช้ **Docker** และ Deploy เป็น Serverless Microservice บน **Google Cloud Run (GCP)**
  
 ---
  
@@ -20,9 +20,9 @@
  
 | Category | Tools & Frameworks |
 | :--- | :--- |
-| **Deep Learning** | **PyTorch**, YOLOv8 (Detection), **CRNN** (Recognition), **CTC Loss** |
-| **API / MLOps** | **Docker**, **FastAPI**, **Google Cloud Platform (GCP)**, **Roboflow Inference SDK**, Git |
-| **Language** | Python (Advanced), OpenCV, NumPy |
+| **Deep Learning** | **PyTorch**, **CRNN** (Recognition), **CTC Loss**, Roboflow Inference SDK |
+| **API / MLOps** | **Docker**, **FastAPI**, **Google Cloud Platform (GCP)**, Pipelining |
+| **Language** | Python (Advanced), OpenCV |
  
 ---
  
@@ -30,10 +30,10 @@
  
 ระบบถูกออกแบบให้ทำงานเป็น Pipeline แบบ Multi-stage เพื่อเพิ่มความแม่นยำ:
  
-1.  **Stage 1: Plate Detection:** ใช้โมเดล **YOLOv8** ในการระบุตำแหน่ง (Localization) ของแผ่นป้ายทะเบียน
-2.  **Stage 2: Pre-processing & Integration:** ปรับปรุงภาพที่ถูก Crop และใช้ **Roboflow Inference SDK** ในการจัดการ Data Flow ระหว่างขั้นตอน
-3.  **Stage 3: Character Recognition (OCR):** นำภาพที่ Crop แล้วเข้าสู่โมเดล **CRNN** ที่ฝึกฝนด้วย **CTC Loss** เพื่อแปลงภาพเป็นข้อความ
-4.  **Stage 4: Classification:** ใช้โมเดลขนาดเล็ก (เช่น ResNet) ในการจำแนกหมวดหมู่จังหวัด (Optional Stage)
+1.  **Stage 1: Initial Detection:** ใช้ **Roboflow 3.0 Object Detection** ระบุตำแหน่งของแผ่นป้ายทะเบียนในภาพ Raw Image
+2.  **Stage 2: Text Segmentation:** ใช้ **RF-DETR (Medium)** ครอบแยกตัวอักษร/เลขทะเบียน และจังหวัดจากป้ายที่ถูกตรวจจับมา
+3.  **Stage 3: Recognition (OCR):** นำภาพที่ถูกแยกแล้วเข้าสู่โมเดล **CRNN** (ฝึกฝนด้วย **CTC Loss**) แปลงภาพเป็นข้อความ
+4.  **Stage 4: Classification:** จำแนกหมวดหมู่จังหวัด (Optional Stage)
  
 ---
  
