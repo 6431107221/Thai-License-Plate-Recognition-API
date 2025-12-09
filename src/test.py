@@ -3,14 +3,17 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from PIL import Image
-import torchvision.transforms as T
 import json
 import editdistance
 from tqdm.auto import tqdm
 
-# Import Class โมเดลและฟังก์ชันช่วยจากไฟล์ของเรา
+# Import Class โมเดลและฟังก์ชันช่วย
 from models import ResNetCRNN, ProvinceClassifier
 from utils import beam_search_decode 
+
+# IMPORT DATASET (เรียกใช้ Transform ที่ถูกต้องจาก dataset.py)
+# ต้องแน่ใจว่า dataset.py อยู่ในโฟลเดอร์เดียวกับไฟล์นี้
+from datasets import get_ocr_transforms, get_prov_transforms
 
 # --- CONFIG ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -19,27 +22,19 @@ print(f"Using device: {DEVICE}")
 CROPS_ROOT = Path("crops_all")
 TEST_CSV_PATH = CROPS_ROOT / "test" / "test_unified.csv"
 
-# 🌟 Path โมเดล (ปรับตามที่คุณขอ)
-OCR_MODEL_PATH = Path("ocr_minimal/best_model.pth")
-PROV_MODEL_PATH = Path("ocr_minimal/province_best.pth")
+# Path โมเดล
+OCR_MODEL_PATH = Path("ocr_train_out/best_model.pth")
+PROV_MODEL_PATH = Path("ocr_train_out/province_best.pth")
 CHAR_MAP_PATH = Path("ocr_minimal/int_to_char.json")
 
-# --- Transforms (สำหรับการ Test ไม่ต้อง Augment) ---
-tf_ocr_eval = T.Compose([
-    T.Resize((64, 256)), 
-    T.ToTensor()
-])
-
-tf_prov_eval = T.Compose([
-    T.Resize((224, 224)), 
-    T.ToTensor(),
-    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
+# Transforms (ใช้จาก dataset.py โดยระบุ is_train=False) 
+# วิธีนี้จะทำให้ใช้ SmartResize และ Normalization เดียวกับตอนเทรนเป๊ะๆ
+tf_ocr_eval = get_ocr_transforms(is_train=False)
+tf_prov_eval = get_prov_transforms(is_train=False)
 
 def find_image_file(filename):
     """ฟังก์ชันช่วยหาไฟล์รูปภาพในโฟลเดอร์ crops_all"""
     if not filename: return None
-    # แปลง / เป็น \ สำหรับ Windows
     filename = str(filename).replace("\\", "/")
     
     candidates = [
@@ -51,7 +46,7 @@ def find_image_file(filename):
     return None
 
 def main():
-    # 1. Load Char Map (แก้ Encoding utf-8)
+    # 1. Load Char Map
     if not CHAR_MAP_PATH.exists():
         print(f"Error: {CHAR_MAP_PATH} not found.")
         return
@@ -66,17 +61,11 @@ def main():
     if OCR_MODEL_PATH.exists():
         print(f" Loading existing OCR model from {OCR_MODEL_PATH}...")
         try:
-            # 1. โหลด Checkpoint (พร้อม weights_only=True เพื่อความปลอดภัย)
             ckpt = torch.load(OCR_MODEL_PATH, map_location=DEVICE, weights_only=True) 
-            
-            # 2. ดึง State Dict (OCR Model ถูกบันทึกด้วย Key: "model_state_dict")
             state_dict = ckpt["model_state_dict"]
-            
             ocr_model.load_state_dict(state_dict) 
-            
             ocr_model.eval() 
             print("  Model loaded successfully!")
-            
         except Exception as e:
             print(f"  Load failed: {e}. Skipping OCR inference.")
             return 
@@ -85,14 +74,14 @@ def main():
         return
 
     # --- Province Model ---
-    prov_idx2prov = {} # ตัวแปรเก็บ Map เลข -> ชื่อจังหวัด
+    prov_idx2prov = {}
     
     if PROV_MODEL_PATH.exists():
         print(f" Loading Province model from {PROV_MODEL_PATH}...")
         try:
             ckpt = torch.load(PROV_MODEL_PATH, map_location=DEVICE, weights_only=True)
             
-            # 1. ดึง Class Map
+            # ดึง Class Map
             if "class_map" in ckpt:
                 prov_idx2prov = ckpt["class_map"]
                 prov_idx2prov = {int(k):v for k,v in prov_idx2prov.items()}
@@ -100,16 +89,13 @@ def main():
                 print("Warning: 'class_map' not found in province checkpoint.")
                 return
 
-            # 2. Init Model
+            # Init Model
             prov_model = ProvinceClassifier(len(prov_idx2prov)).to(DEVICE)
             
-            # 3. ดึง State Dict
-            if "model_state" in ckpt:
-                state_dict = ckpt["model_state"]
-            else:
-                state_dict = ckpt # กรณี save แบบทั้งก้อน
+            # ดึง State Dict
+            state_dict = ckpt.get("model_state", ckpt)
             
-            # 🌟 4. FIX: เพิ่ม Key Adaptation (เติม model. นำหน้า) 🌟
+            # FIX: แก้ไข Key prefix ถ้าจำเป็น (model.xxx)
             new_state_dict = {}
             for k, v in state_dict.items():
                 if not k.startswith("model."):
@@ -117,7 +103,6 @@ def main():
                 else:
                     new_state_dict[k] = v
             
-            # โหลดด้วย dict ใหม่
             prov_model.load_state_dict(new_state_dict)
             prov_model.eval()
             print(" Province Model loaded successfully!")
@@ -131,7 +116,7 @@ def main():
 
     # 3. Load Test Data
     if not TEST_CSV_PATH.exists():
-        print(f"Error: Test CSV not found at {TEST_CSV_PATH}. Run preprocess.py first.")
+        print(f"Error: Test CSV not found at {TEST_CSV_PATH}")
         return
         
     test_df = pd.read_csv(TEST_CSV_PATH, dtype=str).fillna("")
@@ -146,42 +131,44 @@ def main():
             img_path = find_image_file(img_rel_path)
             
             if img_path is None:
-                # print(f"Image not found: {img_rel_path}")
                 continue
 
             # --- A. OCR Prediction ---
             pred_plate = ""
             try:
+                # โหลดเป็น Grayscale (L)
                 pil_gray = Image.open(img_path).convert("L")
+                
+                #  ส่งเข้า Transform จาก dataset.py (SmartResize จะทำงานที่นี่)
                 ts_ocr = tf_ocr_eval(pil_gray).unsqueeze(0).to(DEVICE)
                 
                 out_ocr = ocr_model(ts_ocr)
                 log_probs = out_ocr[0].log_softmax(-1)
                 
-                # ใช้ Beam Search (จาก utils.py)
+                # Decode
                 pred_plate = beam_search_decode(log_probs, int_to_char, beam_width=3)
             except Exception as e:
                 print(f"OCR Error on {img_path.name}: {e}")
 
             # --- B. Province Prediction ---
             pred_prov = ""
-            # หาไฟล์รูปจังหวัด (เปลี่ยนชื่อจาก __plate เป็น __prov)
             prov_name = img_path.name.replace("__plate", "__prov")
-            prov_path = img_path.parent.parent / "provs" / prov_name # คาดเดา path
+            prov_path = img_path.parent.parent / "provs" / prov_name
             
-            # ถ้าหาไม่เจอ ให้ลองหาแบบ recursive
             if not prov_path.exists():
                  prov_path = find_image_file(prov_name)
 
             if prov_path and prov_path.exists():
                 try:
-                    pil_rgb = Image.open(prov_path).convert("RGB")
-                    ts_prov = tf_prov_eval(pil_rgb).unsqueeze(0).to(DEVICE)
+                    # โหลดเป็น Grayscale (L) ก็พอ เพราะ get_prov_transforms จะจัดการทำ Fake RGB ให้เอง
+                    pil_prov = Image.open(prov_path).convert("L")
+                    
+                    # 🌟 ส่งเข้า Transform จาก dataset.py
+                    ts_prov = tf_prov_eval(pil_prov).unsqueeze(0).to(DEVICE)
                     
                     out_prov = prov_model(ts_prov)
                     idx = out_prov.argmax(1).item()
                     
-                    # Map Index กลับเป็นชื่อจังหวัด
                     pred_prov = prov_idx2prov.get(idx, str(idx))
                 except Exception as e:
                     print(f"Province Error on {prov_name}: {e}")

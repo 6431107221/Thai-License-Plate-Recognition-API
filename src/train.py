@@ -60,7 +60,7 @@ def train_province_model():
     print(f"Train samples: {len(train_df_raw)} -> {len(train_df)}")
 
     # ============================================================
-    # 🌟 Load Class Map จากโมเดลเก่า 🌟
+    #  Load Class Map จากโมเดลเก่า 
     # ============================================================
     forced_map = None
     LOAD_PATH = Path("ocr_minimal/province_best.pth") # โมเดลต้นฉบับ

@@ -16,6 +16,9 @@ import os
 from src.models import ResNetCRNN, ProvinceClassifier
 from src.utils import beam_search_decode
 
+#  IMPORT DATASET (แก้ตรงนี้: เรียกใช้ Transform ที่ถูกต้อง) 
+from src.datasets import get_ocr_transforms, get_prov_transforms
+
 app = FastAPI()
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -24,8 +27,8 @@ RF_API_KEY = "8Jx0yKiJpT5lb9rBGVzm"
 MODEL_1_ID = "car-plate-detection-ahcak/3"
 MODEL_2_ID = "ocr_prepare_test-tfc9g/4"
 
-OCR_PATH = Path("ocr_minimal/best_model.pth")
-PROV_PATH = Path("ocr_minimal/province_best.pth")
+OCR_PATH = Path("ocr_train_out/best_model.pth")
+PROV_PATH = Path("ocr_train_out/province_best.pth")
 CHAR_MAP = Path("ocr_minimal/int_to_char.json")
 
 # Debug Folder
@@ -39,15 +42,14 @@ prov_model = None
 int_to_char = {}
 prov_idx2prov = {}
 
-# Transforms
-tf_ocr = T.Compose([T.Resize((64, 256)), T.ToTensor()])
-tf_prov = T.Compose([T.Resize((224, 224)), T.ToTensor(), 
-                     T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+#  FIX: ใช้ Transform มาตรฐานเดียวกับ Dataset (สำคัญมาก!) 
+tf_ocr = get_ocr_transforms(is_train=False)
+tf_prov = get_prov_transforms(is_train=False)
 
 @app.on_event("startup")
 async def startup_event():
     global rf_client, ocr_model, prov_model, int_to_char, prov_idx2prov
-    print("🚀 Server Starting... Loading Models...")
+    print(" Server Starting... Loading Models...")
     
     rf_client = InferenceHTTPClient(api_url="https://detect.roboflow.com", api_key=RF_API_KEY)
     
@@ -62,7 +64,7 @@ async def startup_event():
             state = ckpt['model_state_dict'] if 'model_state_dict' in ckpt else ckpt
             ocr_model.load_state_dict(state)
             ocr_model.eval()
-            print("✅ OCR Model Loaded")
+            print(" OCR Model Loaded")
         except: pass
 
     if PROV_PATH.exists():
@@ -80,14 +82,13 @@ async def startup_event():
                     else: new_state_dict[k] = v
                 prov_model.load_state_dict(new_state_dict)
                 prov_model.eval()
-                print("✅ Province Model Loaded")
+                print(" Province Model Loaded")
         except: pass
         
-    print("✅ All Models Ready!")
+    print(" All Models Ready!")
 
 @app.post("/detect")
 async def detect_pipeline(file: UploadFile = File(...)):
-    # Generate Request ID for Debugging
     req_id = int(time.time())
     print(f"\n--- Processing Request ID: {req_id} ---")
 
@@ -95,7 +96,7 @@ async def detect_pipeline(file: UploadFile = File(...)):
     image_data = await file.read()
     raw_img_rgb = Image.open(io.BytesIO(image_data)).convert("RGB")
     
-    # Debug 1: Save Raw
+    # Save Raw for Debug
     raw_img_rgb.save(DEBUG_DIR / f"{req_id}_0_raw.jpg")
     
     # Prepare Grayscale for Roboflow
@@ -130,7 +131,6 @@ async def detect_pipeline(file: UploadFile = File(...)):
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(W, x2), min(H, y2)
     
-    # Crop RGB (เก็บไว้ใช้ตอนท้ายถ้าต้อง Fallback)
     plate_img_rgb = raw_img_rgb.crop((x1, y1, x2, y2))
     
     # Crop Gray (ส่งไป Model 2)
@@ -138,7 +138,6 @@ async def detect_pipeline(file: UploadFile = File(...)):
     temp_plate_path = DEBUG_DIR / f"{req_id}_temp_plate_gray.jpg"
     plate_img_gray.save(temp_plate_path)
     
-    # Debug 2: Save Plate Crop
     plate_img_rgb.save(DEBUG_DIR / f"{req_id}_1_crop_plate.jpg")
 
     # ==========================================
@@ -162,7 +161,6 @@ async def detect_pipeline(file: UploadFile = File(...)):
         bx1, by1 = max(0, box[0]), max(0, box[1])
         bx2, by2 = min(pW, box[2]), min(pH, box[3])
         
-        # Crop จาก RGB
         component_img = plate_img_rgb.crop((bx1, by1, bx2, by2))
         
         if "Plate" in cls:
@@ -171,7 +169,7 @@ async def detect_pipeline(file: UploadFile = File(...)):
             province_crop = component_img
 
     # ==========================================
-    # STEP 4: Recognition & Debug Saving
+    # STEP 4: Recognition
     # ==========================================
     result = {
         "RequestID": req_id,
@@ -183,14 +181,16 @@ async def detect_pipeline(file: UploadFile = File(...)):
     
     # --- 4.1 OCR ---
     img_for_ocr = license_crop if license_crop else plate_img_rgb
-    
-    # Debug 3: Save OCR Input
     img_for_ocr.save(DEBUG_DIR / f"{req_id}_2_input_ocr.jpg")
     
     if img_for_ocr:
         try:
+            #  แปลงเป็น Grayscale ก่อนส่งเข้า Transform
             gray = img_for_ocr.convert("L")
+            
+            # SmartResize จะทำงานใน tf_ocr นี้
             ts = tf_ocr(gray).unsqueeze(0).to(DEVICE)
+            
             with torch.no_grad():
                 out = ocr_model(ts)
                 text = beam_search_decode(out[0].log_softmax(-1), int_to_char)
@@ -203,20 +203,22 @@ async def detect_pipeline(file: UploadFile = File(...)):
     result["Method"] = "Roboflow"
     
     if not img_for_prov:
-        # Fallback: Heuristic (35% ล่าง)
         img_for_prov = plate_img_rgb.crop((0, int(pH*0.65), pW, pH))
         result["Method"] = "Heuristic (Fallback)"
 
-    # Debug 4: Save Province Input
     img_for_prov.save(DEBUG_DIR / f"{req_id}_3_input_prov.jpg")
 
     if img_for_prov:
         try:
-            # Fake RGB (Gray -> RGB) เพื่อลด Noise สีที่ไม่จำเป็น
-            # แต่ถ้าเทรนด้วย RGB รอบหน้า ให้ลบ .convert("L") ออก
-            rgb_fake = img_for_prov.convert("L").convert("RGB")
+            #  ไม่ต้องแปลง Fake RGB เองแล้ว ปล่อยให้ Transform จัดการ
+            # ส่งภาพเข้า tf_prov ได้เลย (มันจะเช็คและแปลงให้ถ้าจำเป็น)
+            # แต่ปกติ SmartResize รองรับ PIL RGB/L อยู่แล้ว
             
-            ts = tf_prov(rgb_fake).unsqueeze(0).to(DEVICE)
+            # ถ้า img_for_prov เป็น RGB ก็ส่ง RGB
+            # ถ้าเป็น L ก็ส่ง L
+            
+            ts = tf_prov(img_for_prov).unsqueeze(0).to(DEVICE)
+            
             with torch.no_grad():
                 out = prov_model(ts)
                 probs = torch.softmax(out, dim=1)
@@ -228,7 +230,6 @@ async def detect_pipeline(file: UploadFile = File(...)):
         except Exception as e:
             print(f"Province Error: {e}")
 
-    # Clean up temp files
     if os.path.exists(temp_raw_path): os.remove(temp_raw_path)
     if os.path.exists(temp_plate_path): os.remove(temp_plate_path)
 
