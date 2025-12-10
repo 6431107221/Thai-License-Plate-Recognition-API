@@ -44,18 +44,19 @@
 ทำการ Build Docker Image โดยใช้ `Dockerfile` ที่อยู่ใน Root Directory:
  
 ```
-docker build -t asia-southeast1-docker.pkg.dev/[PROJECT_ID]/ocr-api-repo/ocr-api-image:latest .
+docker build -t asia-southeast1-docker.pkg.dev/simai-ocr-api-dev/ocr-api-repo/simai-thai-lpr-api:v2.3 .
 ```
 ### 2. การ Deploy ไปยัง Google Cloud Run (GCP)
 
 หลังจากยืนยันสิทธิ์ gcloud auth configure-docker แล้ว สามารถ Deploy Image ไปยัง GCP Cloud Run ได้ทันที
 ```
-gcloud run deploy ocr-api-service \
-  --image asia-southeast1-docker.pkg.dev/[PROJECT_ID]/ocr-api-repo/ocr-api-image:latest \
-  --platform managed \
-  --region asia-southeast1 \
-  --allow-unauthenticated \
-  --cpu 1 \
-  --memory 512Mi \
-  --max-instances 1
+gcloud run deploy simai-lpr-service \
+    --image asia-southeast1-docker.pkg.dev/simai-ocr-api-dev/ocr-api-repo/simai-thai-lpr-api:v2.3 \
+    --platform managed \
+    --region [asia-southeast1] \
+    --allow-unauthenticated \
+    --cpu 1 \
+    --memory 1Gi \
+    --min-instances=0 \
+    --timeout=600
 ```
