@@ -20,3 +20,5 @@ scikit-learn
 fastapi
 uvicorn
 python-multipart
+
+#https://simai-lpr-service-264688546074.asia-southeast1.run.app

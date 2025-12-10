@@ -2,4 +2,4 @@
 .git
 .venv
 __pycache__
-temp_*
+temp_* debug_images/

@@ -55,53 +55,53 @@ class SmartResize:
         return new_img
 
 # --- Transforms Config ---
+# datasets.py
+
 def get_ocr_transforms(is_train=True):
-    # OCR Target: Height=64, Width=256 (ตามโมเดล CRNN)
     base_transforms = [
-        # ใช้ Smart Resize แทน T.Resize((64, 256)) เดิม
         SmartResize((64, 256), is_ocr=True),
         T.ToTensor(),
         T.Normalize(mean=[0.5], std=[0.5])
     ]
     
     if is_train:
-        # Augmentation สำหรับ OCR
         augments = [
-            T.RandomApply([T.GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.0))], p=0.3),
-            # ตัด ColorJitter ออกเพราะเป็น Grayscale
-            T.RandomAffine(degrees=2, translate=(0.02, 0.05), shear=5, fill=0),
+            # 1. บิดมุม (แก้ปัญหาภาพเอียงจากคำถามก่อนหน้า)
+            T.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.8, 1.2), shear=10, fill=0),
+            T.RandomPerspective(distortion_scale=0.5, p=0.4),
+
+            # 2. จำลองภาพเสีย (Simulation)
+            # เพิ่ม GaussianBlur เพื่อให้โมเดลชินกับภาพเบลอ (เหมือน Dataset)
+            T.RandomApply([T.GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.5))], p=0.3),
+            
+            # 3. เพิ่ม Noise (สำคัญสำหรับ OCR)
+            # ช่วยให้โมเดลไม่สนใจ Pixel ที่แตกๆ ใน Dataset
+            T.Lambda(lambda x: x + 0.05 * torch.randn_like(x) if torch.is_tensor(x) else x),
+            
+            # 4. Random Invert (กลับสีดำขาว)
+            # บางทีป้ายทะเบียนอาจจะเจอเงาสะท้อนจนสีเพี้ยน
+            T.RandomInvert(p=0.1),
         ]
         return T.Compose(augments + base_transforms)
     else:
         return T.Compose(base_transforms)
 
+# สำหรับ Province ทำคล้ายกัน แต่เน้น Grayscale
 def get_prov_transforms(is_train=True):
-    # Province Target: 224x224 (หรือลดเหลือ 128x128 ก็ได้ถ้าภาพแตกมาก)
-    # แต่ MobileNetV2 ปกติรับ 224
-    
-    # 🌟 FIX: รับ Grayscale แต่ทำเป็น 3 Channels (Fake RGB) ในนี้เลย
-    # เพื่อแก้ปัญหา Channel Mismatch โดยไม่ต้องแก้ Dataset
-    
     ops = []
+    ops.append(SmartResize((224, 224), is_ocr=False)) # Resize ก่อน
     
-    # 1. Smart Resize (สำคัญมากสำหรับภาพเล็ก 41x12)
-    ops.append(SmartResize((224, 224), is_ocr=False))
-    
-    # 2. Augmentation (Train only)
     if is_train:
         ops.append(T.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=10))
         ops.append(T.RandomPerspective(distortion_scale=0.2, p=0.3))
-    
-    # 3. Convert to Tensor & Normalize
+        # ปรับความสว่าง/Contrast (แม้จะเป็น Gray ก็ปรับได้)
+        ops.append(T.ColorJitter(brightness=0.5, contrast=0.5)) 
+        
     ops.append(T.ToTensor())
     
-    # 4. 🌟 สำคัญ: ถ้าภาพมาเป็น 1 Channel (Gray) ให้ก๊อปปี้เป็น 3 Channels
-    # Lambda function นี้จะเช็คว่าถ้าเป็น 1 channel ให้ทำซ้ำ
     ops.append(T.Lambda(lambda x: x.repeat(3, 1, 1) if x.shape[0] == 1 else x))
     
-    # Normalize (ค่ามาตรฐาน ImageNet)
     ops.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-    
     return T.Compose(ops)
 
 # --- Datasets (ไม่ต้องแก้ Logic มาก แค่เรียกใช้) ---
@@ -120,7 +120,6 @@ class OCRDataset(Dataset):
         row = self.df.iloc[idx]
         img_path = self.root / row["image"]
         try:
-            # โหลดเป็น Grayscale (L) ตามที่คุณต้องการ
             img = Image.open(img_path).convert("L")
         except:
             img = Image.new('L', (256, 64))
@@ -152,12 +151,12 @@ class ProvinceDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         img_rel_plate = row["image"]
-        # Logic แปลง path ไปหาภาพจังหวัด
+  
         img_rel_prov = img_rel_plate.replace("/plates/", "/provs/").replace("__plate", "__prov")
         img_path = self.root / img_rel_prov
 
         try:
-            # โหลดเป็น Grayscale (L) เหมือนเดิม แล้วให้ Transform จัดการเป็น Fake RGB
+  
             img = Image.open(img_path).convert("L") 
         except:
             img = Image.new("L", (224, 224))
