@@ -13,7 +13,7 @@ img_extension = {".jpg",".jpeg",".png",".bmp",".tif",".tiff"}
 
 def main():
     if not SOURCE_ROOT.exists():
-        raise FileNotFoundError(f"ไม่พบโฟลเดอร์ {SOURCE_ROOT} กรุณาตรวจสอบว่าวางโฟลเดอร์ Dataset ไว้ถูกต้อง")
+        raise FileNotFoundError(f"ไม่พบโฟลเดอร์ {SOURCE_ROOT} ")
     
     for tvt in ["train", "valid", "test"]:
         img_dir = SOURCE_ROOT / tvt / "Images"
@@ -26,7 +26,7 @@ def main():
         province_out.mkdir(parents=True, exist_ok=True)
 
         if not img_dir.exists():
-            print(f"Skipping {tvt} (No images found)")
+            print(f"{tvt} (No images found)")
             continue
 
         id_anno = {}
