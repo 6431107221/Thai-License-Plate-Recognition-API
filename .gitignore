@@ -1,10 +1,7 @@
-# 1. Virtual Environment
 venv/
 
-# 2. Dataset ที่แตกไฟล์ออกมา (มีรูปภาพเยอะ)
 OCR-Car-Plate_dataset/
 
-# 3. โมเดลและผลลัพธ์ที่มีขนาดใหญ่
 *.jpg
 *.png
 *.pth
@@ -12,7 +9,6 @@ OCR-Car-Plate_dataset/
 *.pyc
 __pycache__/
 
-# 4. ผลลัพธ์ที่สร้างขึ้นใหม่
 debug_images/
 crops_all/
 final_results.csv

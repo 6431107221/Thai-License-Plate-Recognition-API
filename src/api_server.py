@@ -11,7 +11,6 @@ import os
 from inference_sdk import InferenceHTTPClient
 
 # Import Config และ Modules
-# ต้องแน่ใจว่า structure ไฟล์ของคุณคือ src.config นะครับ
 from src.config import cfg
 from src.models import ResNetCRNN, ProvinceClassifier
 from src.utils import beam_search_decode
@@ -36,7 +35,7 @@ class LicensePlateService:
             with open(cfg.CHAR_MAP_PATH, 'r', encoding='utf-8') as f:
                 self.int_to_char = json.load(f)
         else:
-            print(f"❌ Critical Error: Char map not found at {cfg.CHAR_MAP_PATH}")
+            print(f"Critical Error: Char map not found at {cfg.CHAR_MAP_PATH}")
 
         # 3. Load Models
         self.ocr_model = self._load_ocr_model()
@@ -46,11 +45,11 @@ class LicensePlateService:
         self.tf_ocr = get_ocr_transforms(is_train=False)
         self.tf_prov = get_prov_transforms(is_train=False)
 
-        print("✅ Service Ready!")
+        print("Service Ready!")
 
     def _load_ocr_model(self):
         path = cfg.OCR_MODEL_SAVE_PATH if cfg.OCR_MODEL_SAVE_PATH.exists() else cfg.OCR_PRETRAINED_PATH
-        print(f"📂 Loading OCR Model from: {path}")
+        print(f"Loading OCR Model from: {path}")
         
         model = ResNetCRNN(1, len(self.int_to_char), hidden_size=256).to(self.device)
         
@@ -60,16 +59,16 @@ class LicensePlateService:
                 state = ckpt.get('model_state_dict', ckpt)
                 model.load_state_dict(state)
                 model.eval()
-                print("   ✅ OCR Loaded Successfully")
+                print("   OCR Loaded Successfully")
             except Exception as e:
-                print(f"   ❌ OCR Load Failed: {e}")
+                print(f"   OCR Load Failed: {e}")
         else:
-             print("   ⚠️ No OCR model file found! Using random weights.")
+             print("   No OCR model file found! Using random weights.")
         return model
 
     def _load_prov_model(self):
         path = cfg.PROV_MODEL_SAVE_PATH if cfg.PROV_MODEL_SAVE_PATH.exists() else cfg.PROV_PRETRAINED_PATH
-        print(f"📂 Loading Province Model from: {path}")
+        print(f"Loading Province Model from: {path}")
         
         idx2prov = {}
         model = ProvinceClassifier(77).to(self.device)
@@ -87,22 +86,18 @@ class LicensePlateService:
                 
                 model.load_state_dict(new_state, strict=False)
                 model.eval()
-                print("   ✅ Province Loaded Successfully")
+                print("   Province Loaded Successfully")
             except Exception as e:
-                print(f"   ❌ Province Load Failed: {e}")
+                print(f"   Province Load Failed: {e}")
         else:
-             print("   ⚠️ No Province model file found!")
+             print("   No Province model file found!")
         return model, idx2prov
 
-    # ========================================================
-    # 🎨 Preprocess: กลับไปใช้แบบดั้งเดิม (Simple Grayscale)
-    # ========================================================
+    # Preprocess
     def preprocess_image_simple(self, pil_img):
         # 1. Convert to Grayscale
         gray = pil_img.convert("L")
-        
-        # 2. Auto Contrast (แบบเดิมที่คุณเคยใช้แล้วเวิร์ค)
-        # ช่วยดึงสีตัวอักษรให้เข้มขึ้นจากพื้นหลัง โดยไม่ทำลายรายละเอียดเหมือน Threshold
+        # 2. Auto Contrast
         gray = ImageOps.autocontrast(gray)
         
         return gray
@@ -178,7 +173,7 @@ class LicensePlateService:
         if not province_crop:
             province_crop = plate_crop.crop((0, int(pH*0.6), pW, pH))
 
-        # 4. Preprocess (Simple Grayscale)
+        # 4. Preprocess 
         ocr_input = self.preprocess_image_simple(license_crop)
         prov_input = self.preprocess_image_simple(province_crop)
 
@@ -188,7 +183,6 @@ class LicensePlateService:
 
         # 5. Inference
         result = {
-            "RequestID": req_id,
             "Plate": "", 
             "Province": "",
             "Conf_Prov": 0.0

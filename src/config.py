@@ -2,9 +2,7 @@ import torch
 from pathlib import Path
 
 class Config:
-    # ==========================================
     # 1. System & Paths
-    # ==========================================
     PROJECT_ROOT = Path(__file__).parent.parent.absolute()
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     NUM_WORKERS = 0 
@@ -19,16 +17,13 @@ class Config:
     TEST_CSV  = CROPS_DIR / "test" / "test_unified.csv"
 
     # ==========================================
-    # 🌟 NEW: Model Paths (แยก Load กับ Save)
-    # ==========================================
-    # 1. Pretrained Models (โมเดลตั้งต้น/Backup ที่อยู่ใน ocr_minimal)
-    # ใช้สำหรับ: โหลดมาเป็นฐานก่อนเริ่ม Train ใหม่
+    # Model Paths
+    # 1. Pretrained Models
     PRETRAINED_DIR = PROJECT_ROOT / "ocr_minimal"
     OCR_PRETRAINED_PATH  = PRETRAINED_DIR / "best_model.pth"
     PROV_PRETRAINED_PATH = PRETRAINED_DIR / "province_best.pth"
     
-    # 2. Trained Models (โมเดลผลลัพธ์ ที่อยู่ใน ocr_train_out)
-    # ใช้สำหรับ: Save ตอนเทรนเสร็จ และ Load ไปใช้ใน API/Test
+    # 2. Output Trained Models
     OUTPUT_DIR = PROJECT_ROOT / "ocr_train_out"
     OCR_MODEL_SAVE_PATH  = OUTPUT_DIR / "best_model.pth"
     PROV_MODEL_SAVE_PATH = OUTPUT_DIR / "province_best.pth"
@@ -39,15 +34,13 @@ class Config:
     IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
     # ==========================================
-    # 2. Roboflow Settings (API)
-    # ==========================================
+    # 2. Roboflow(API)
     RF_API_KEY = "8Jx0yKiJpT5lb9rBGVzm"
     MODEL_DETECTION_ID = "car-plate-detection-ahcak/3" 
     MODEL_OCR_PREP_ID  = "ocr_prepare_test-tfc9g/4"    
 
     # ==========================================
     # 3. Training Hyperparameters
-    # ==========================================
     EPOCHS = 50
     EARLY_STOPPING_PATIENCE = 15
     LEARNING_RATE = 5e-5
@@ -56,8 +49,7 @@ class Config:
     BATCH_SIZE_PROV = 32
 
     # ==========================================
-    # 4. Image Augmentation (Config เดิม)
-    # ==========================================
+    # 4. Image Augmentation 
     OCR_TARGET_SIZE = (64, 256)
     PROV_TARGET_SIZE = (224, 224)
     
@@ -72,12 +64,10 @@ class Config:
 
     # ==========================================
     # 5. Debug
-    # ==========================================
     DEBUG_MODE = True
     DEBUG_IMAGE_DIR = PROJECT_ROOT / "debug_images"
 
 cfg = Config()
 
-# สร้างโฟลเดอร์ Output อัตโนมัติ
 cfg.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 cfg.DEBUG_IMAGE_DIR.mkdir(parents=True, exist_ok=True)

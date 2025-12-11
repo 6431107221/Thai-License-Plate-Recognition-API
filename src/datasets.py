@@ -6,40 +6,36 @@ import torchvision.transforms as T
 import torchvision.transforms.functional as F
 import numpy as np
 
-# --- 🌟 Custom Transform: Smart Resize with Padding 🌟 ---
 class SmartResize:
     def __init__(self, target_size, fill=0, is_ocr=False):
         """
         target_size: (height, width) for OCR, (height, width) for Province
         is_ocr: ถ้าเป็น OCR เราจะ fix height แล้วปล่อย width
         """
-        self.target_size = target_size # (H, W)
+        self.target_size = target_size 
         self.fill = fill
         self.is_ocr = is_ocr
 
     def __call__(self, img):
-        # img is PIL Image
         tgt_h, tgt_w = self.target_size
         w, h = img.size
 
-        # 1. คำนวณ Scale เพื่อรักษาสัดส่วน
         if self.is_ocr:
-            # สำหรับ OCR: ยึดความสูงเป็นหลัก (Height=64), ความกว้างปรับตาม
+            # OCR: ยึดความสูงเป็นหลัก, ความกว้างปรับตาม
             scale = tgt_h / h
             new_h = tgt_h
             new_w = int(w * scale)
-            # แต่ถ้า new_w เกิน tgt_w ให้ยึดความกว้างแทน
+            # ถ้า new_w เกิน tgt_w ให้ยึดความกว้างแทน
             if new_w > tgt_w:
                 scale = tgt_w / w
                 new_w = tgt_w
                 new_h = int(h * scale)
         else:
-            # สำหรับ Province (Square): ยึดด้านที่ยาวที่สุด
+            # Province: ยึดด้านที่ยาวสุด
             scale = min(tgt_h / h, tgt_w / w)
             new_h = int(h * scale)
             new_w = int(w * scale)
 
-        # 2. Resize ด้วย BICUBIC (ดีที่สุดสำหรับภาพเล็กไปใหญ่)
         img = img.resize((new_w, new_h), resample=Image.BICUBIC)
 
         # 3. Create Background & Paste (Padding)
@@ -55,7 +51,6 @@ class SmartResize:
         return new_img
 
 # --- Transforms Config ---
-# datasets.py
 
 def get_ocr_transforms(is_train=True):
     base_transforms = [
@@ -66,27 +61,24 @@ def get_ocr_transforms(is_train=True):
     
     if is_train:
         augments = [
-            # 1. บิดมุม (แก้ปัญหาภาพเอียงจากคำถามก่อนหน้า)
+            # 1. บิดมุม
             T.RandomAffine(degrees=10, translate=(0.05, 0.05), scale=(0.8, 1.2), shear=10, fill=0),
             T.RandomPerspective(distortion_scale=0.5, p=0.4),
 
-            # 2. จำลองภาพเสีย (Simulation)
-            # เพิ่ม GaussianBlur เพื่อให้โมเดลชินกับภาพเบลอ (เหมือน Dataset)
+            # 2.เพิ่ม GaussianBlur
             T.RandomApply([T.GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 1.5))], p=0.3),
             
-            # 3. เพิ่ม Noise (สำคัญสำหรับ OCR)
-            # ช่วยให้โมเดลไม่สนใจ Pixel ที่แตกๆ ใน Dataset
+            # 3. เพิ่ม Noise
             T.Lambda(lambda x: x + 0.05 * torch.randn_like(x) if torch.is_tensor(x) else x),
             
-            # 4. Random Invert (กลับสีดำขาว)
-            # บางทีป้ายทะเบียนอาจจะเจอเงาสะท้อนจนสีเพี้ยน
+            # 4. Random Invert
             T.RandomInvert(p=0.1),
         ]
         return T.Compose(augments + base_transforms)
     else:
         return T.Compose(base_transforms)
 
-# สำหรับ Province ทำคล้ายกัน แต่เน้น Grayscale
+# Province 
 def get_prov_transforms(is_train=True):
     ops = []
     ops.append(SmartResize((224, 224), is_ocr=False)) # Resize ก่อน
@@ -94,7 +86,6 @@ def get_prov_transforms(is_train=True):
     if is_train:
         ops.append(T.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=10))
         ops.append(T.RandomPerspective(distortion_scale=0.2, p=0.3))
-        # ปรับความสว่าง/Contrast (แม้จะเป็น Gray ก็ปรับได้)
         ops.append(T.ColorJitter(brightness=0.5, contrast=0.5)) 
         
     ops.append(T.ToTensor())
@@ -104,7 +95,7 @@ def get_prov_transforms(is_train=True):
     ops.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
     return T.Compose(ops)
 
-# --- Datasets (ไม่ต้องแก้ Logic มาก แค่เรียกใช้) ---
+# --- Datasets ---
 class OCRDataset(Dataset):
     def __init__(self, df, root, char_to_int, transform=None):
         self.df = df.reset_index(drop=True)

@@ -1,4 +1,3 @@
-# กำหนด Extra Indexes URLs ที่จำเป็นสำหรับการค้นหา
 --extra-index-url https://download.pytorch.org/whl/cu118
 --extra-index-url https://pypi.org/simple
 
@@ -16,9 +15,8 @@ requests
 editdistance
 scikit-learn
 
-# Web/API Dependencies
+
 fastapi
 uvicorn
 python-multipart
 
-#https://simai-lpr-service-264688546074.asia-southeast1.run.app

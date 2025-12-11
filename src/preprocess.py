@@ -12,11 +12,9 @@ CROPS_DIR = Path("crops_all")
 img_extension = {".jpg",".jpeg",".png",".bmp",".tif",".tiff"}
 
 def main():
-    # 1. ตรวจสอบโฟลเดอร์ Source
     if not SOURCE_ROOT.exists():
         raise FileNotFoundError(f"ไม่พบโฟลเดอร์ {SOURCE_ROOT} กรุณาตรวจสอบว่าวางโฟลเดอร์ Dataset ไว้ถูกต้อง")
     
-    # 2. Crop Images
     for tvt in ["train", "valid", "test"]:
         img_dir = SOURCE_ROOT / tvt / "Images"
         anno_dir = SOURCE_ROOT / tvt / "_annotations.coco.json"
@@ -31,10 +29,9 @@ def main():
             print(f"Skipping {tvt} (No images found)")
             continue
 
-        # โหลด Annotations
         id_anno = {}
         id_cate = {}
-        id_img_map = {} # Map id -> filename
+        id_img_map = {}
 
         if anno_dir.exists():
             data = json.load(open(anno_dir, 'r', encoding='utf-8'))
@@ -49,7 +46,7 @@ def main():
         images = [p for p in img_dir.rglob("*") if p.suffix.lower() in img_extension]
         print(f"[{tvt}] Found {len(images)} images in source.")
 
-        # --- เริ่ม Loop Crop ---
+        # --- Loop Crop ---
         count_skipped = 0
         count_cropped = 0
         
@@ -59,18 +56,15 @@ def main():
             out_name_plate = f"{tvt}__{p.stem}__plate{p.suffix}"
             out_path_plate = plate_out / out_name_plate
 
-            #  เช็ค: ถ้ามีไฟล์แล้ว ให้ข้าม (Skip)
             if out_path_plate.exists():
                 count_skipped += 1
                 continue
 
             try:
-                # ถ้ายังไม่มี ค่อยโหลดภาพ
                 img = Image.open(p).convert('RGB')
                 W, H = img.size
                 
-                # หา Image ID จากชื่อไฟล์ (ต้องตรงกับใน JSON)
-                # Logic: วนหาว่าชื่อไฟล์ p.name ตรงกับ file_name ใน json หรือไม่
+                # วนหาชื่อไฟล์ p.name ตรงกับ file_name ใน json หรือไม่
                 img_id = None
                 for k_id, v_fname in id_img_map.items():
                     if v_fname == p.name:
@@ -87,17 +81,14 @@ def main():
                         if "prov" in cname or "จังหวัด" in cname or "province" in cname:
                             province_bbox = a["bbox"]
 
-                # Save Crop Image (Plate)
                 saved_plate = False
                 if plate_bbox:
                     x, y, w, h = plate_bbox
-                    # ขยายขอบเล็กน้อยหรือ Crop ตาม BBox
                     crop = img.crop((int(x), int(y), int(x+w), int(y+h))).convert("L")
                     if crop.width > 2 and crop.height > 2:
                         crop.save(out_path_plate)
                         saved_plate = True
 
-                # Save Crop Image (Province)
                 if province_bbox:
                     x, y, w, h = province_bbox
                     crop = img.crop((int(x), int(y), int(x+w), int(y+h))).convert("RGB")
@@ -108,7 +99,6 @@ def main():
                 # Fallback (ถ้าไม่มี Plate ใช้ตรงกลางล่าง)
                 if not saved_plate:
                     out_name_fallback = f"{tvt}__{p.stem}__plate_fallback{p.suffix}"
-                    # Fallback Logic
                     cw, ch = int(W*0.45), int(H*0.14)
                     x0 = (W-cw)//2; y0 = int(H*0.7)
                     crop = img.crop((x0, y0, x0+cw, y0+ch)).convert("L")
@@ -117,16 +107,16 @@ def main():
                 count_cropped += 1
 
             except Exception as e:
-                print(f"Error processing {p}: {e}")
+                print(f"Error {p}: {e}")
                 continue
         
         print(f"   -> Cropped: {count_cropped}, Skipped (Already existed): {count_skipped}")
 
-    # 3. Match CSV (Simplified Logic)
-    print("\nGenerating CSVs inside crops_all folders...")
+    # 3. Match CSV 
+    print("\nGenerating CSVs")
     
     # กำหนดคู่ (Input CSV, Output Filename, Split Folder Name)
-    # Output Name เป็นแค่ชื่อไฟล์ เพราะเราจะเอาไปแปะใน folder crops_all/{split}/
+    # Output Name เป็นแค่ชื่อไฟล์
     DATA_SETS = [
         (SOURCE_ROOT/"train"/"train_data.csv", "train_unified.csv", "train"),
         (SOURCE_ROOT/"valid"/"valid_data.csv", "val_unified.csv",   "valid"),
@@ -134,7 +124,6 @@ def main():
     ]
 
     for inp, out_name, split in DATA_SETS:
-        # Save path ใหม่: crops_all/{split}/{out_name}
         out_path = CROPS_DIR / split / out_name
         process_mapping_simple(inp, out_path, split)
 
@@ -146,32 +135,27 @@ def process_mapping_simple(csv_path, out_path, split_folder):
     print(f"\nProcessing: {csv_path.name} -> {out_path}")
     df = pd.read_csv(csv_path, dtype=str).fillna("")
 
-    # โฟลเดอร์ที่มีรูป Crop แล้ว
+
     target_dir = CROPS_DIR / split_folder / "plates"
-    # หาไฟล์ทั้งหมดในนั้น
-    plate_files = list(target_dir.glob("*")) # เอาทุกไฟล์ใน folder
+    plate_files = list(target_dir.glob("*"))
     print(f"  Found {len(plate_files)} crops in {target_dir}")
 
-    # สร้าง Lookup Table: Original Stem -> Crop Path
-    # ตัวอย่างชื่อไฟล์ Crop: "train__image_01__plate.jpg"
-    # เราจะแยกด้วย "__" เพื่อเอาตรงกลางคือ "image_01" มาเป็น Key
+    # Crop: "train__image_01__plate.jpg"
     stem_to_crop = {}
     for p in plate_files:
         parts = p.name.split("__")
         if len(parts) >= 3:
             # parts[0] = split (train), parts[1] = stem, parts[2] = suffix
-            # แต่บางทีชื่อไฟล์เดิมอาจมี underscore เราต้องระวัง
-            # วิธีที่ดีกว่า: ตัด prefix "{split}__" และ suffix "__plate{ext}" ออก
+            # ตัด prefix "{split}__" และ suffix "__plate{ext}" 
             prefix = f"{split_folder}__"
             if p.name.startswith(prefix):
                 temp = p.name[len(prefix):] # ตัด prefix
-                # หาตำแหน่งของ "__plate" สุดท้าย
+                # หาตำแหน่ง "__plate" 
                 idx = temp.rfind("__plate")
                 if idx != -1:
-                    stem = temp[:idx] # ได้ stem แท้ๆ แล้ว
+                    stem = temp[:idx]
                     stem_to_crop[stem.lower()] = p
 
-    # ค้นหา Column
     cols_map = {c.lower():c for c in df.columns}
     fname_col = next((cols_map[c] for c in cols_map if any(x in c for x in ["file","image","name"])), None)
     plate_col = next((cols_map[c] for c in cols_map if any(x in c for x in ["plate","label","gt"])), None)
@@ -189,20 +173,14 @@ def process_mapping_simple(csv_path, out_path, split_folder):
         gt_plate = str(r[plate_col]).strip() if plate_col else ""
         gt_prov  = str(r[prov_col]).strip() if prov_col else ""
 
-        # แปลงชื่อใน CSV ให้เป็น Stem (ตัดนามสกุลออก)
         orig_stem = Path(orig_name).stem.lower()
 
-        # Match!
+        # Match
         if orig_stem in stem_to_crop:
             crop_path = stem_to_crop[orig_stem]
-            # Save Relative Path (เพื่อให้ DataLoader หาเจอ)
-            # ต้อง relative กับ CROPS_DIR (เพราะใน Dataset class เราเอา root มาต่อ)
-            # แต่เดี๋ยวก่อน! ปกติ Dataset class จะรับ root.
-            # ถ้าเราเก็บ csv ไว้ใน crops_all/train/ เราควรใช้ path ที่ relative กับ crops_all หรือ absolute?
-            # Standard: relative to CROPS_DIR (root)
             rel_path = crop_path.relative_to(CROPS_DIR)
             rows.append({
-                "image": str(rel_path).replace("\\", "/"), # Fix windows path separator
+                "image": str(rel_path).replace("\\", "/"), 
                 "gt_plate": gt_plate, 
                 "gt_province": gt_prov
             })
@@ -214,7 +192,7 @@ def process_mapping_simple(csv_path, out_path, split_folder):
         pd.DataFrame(rows).to_csv(out_path, index=False, encoding="utf-8-sig")
         print(f"  Saved {len(rows)} rows to {out_path}")
     else:
-        print("No matches found! Check filename logic.")
+        print("No matches found")
     
     if missed_count > 0:
         print(f"  (Missed {missed_count} files)")

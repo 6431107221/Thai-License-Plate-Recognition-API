@@ -10,7 +10,7 @@ import editdistance
 from sklearn.metrics import f1_score
 from pathlib import Path
 
-# Import Config & Custom Modules
+# Import
 from config import cfg
 from models import ResNetCRNN, ProvinceClassifier
 from datasets import OCRDataset, ProvinceDataset, ocr_collate, get_ocr_transforms, get_prov_transforms
@@ -18,32 +18,25 @@ from utils import best_path_decode
 
 class ProvinceTrainer:
     def __init__(self):
-        print("\n=== Initializing Province Trainer ===")
+        print("\n=== Province Trainer ===")
         self.device = cfg.DEVICE
         
-        # 1. Prepare Data
         self._prepare_data()
         
-        # 2. Setup Model & Class Map
         self._setup_model()
         
-        # 3. Setup Optimizer & Loss
         self._setup_optimization()
         
-        # Stat Tracking
         self.best_f1 = 0.0
         self.start_epoch = 0
 
     def _prepare_data(self):
-        # Load CSV
         if not cfg.TRAIN_CSV.exists():
             raise FileNotFoundError(f"CSV not found at {cfg.TRAIN_CSV}")
             
         train_df_raw = pd.read_csv(cfg.TRAIN_CSV).fillna("")
         val_df_raw = pd.read_csv(cfg.VAL_CSV).fillna("")
         
-        # Filter (Helper function logic moved here)
-        print(" Filtering non-existing images...")
         self.train_df = self._filter_existing(train_df_raw)
         self.val_df = self._filter_existing(val_df_raw)
         print(f" Train samples: {len(self.train_df)}, Val samples: {len(self.val_df)}")
@@ -58,7 +51,6 @@ class ProvinceTrainer:
         return pd.DataFrame(valid_rows)
 
     def _setup_model(self):
-        # Try to load existing class map first
         forced_map = None
         load_source = None
         
@@ -200,7 +192,7 @@ class ProvinceTrainer:
 
 class OCRTrainer:
     def __init__(self):
-        print("\n=== Initializing OCR Trainer ===")
+        print("\n=== OCR Trainer ===")
         self.device = cfg.DEVICE
         
         # 1. Load Char Map
@@ -322,7 +314,6 @@ class OCRTrainer:
         print("       Model Saved!")
 
 if __name__ == "__main__":
-    # เลือก Train ทีละตัว หรือทั้งคู่ก็ได้
     
     # 1. Train Province
     prov_trainer = ProvinceTrainer()
