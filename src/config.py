@@ -1,5 +1,9 @@
 import torch
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Config:
     # 1. System & Paths
@@ -35,7 +39,7 @@ class Config:
 
     # ==========================================
     # 2. Roboflow(API)
-    RF_API_KEY = "8Jx0yKiJpT5lb9rBGVzm"
+    RF_API_KEY = os.getenv("ROBOFLOW_API_KEY")
     MODEL_DETECTION_ID = "car-plate-detection-ahcak/3" 
     MODEL_OCR_PREP_ID  = "ocr_prepare_test-tfc9g/4"    
 

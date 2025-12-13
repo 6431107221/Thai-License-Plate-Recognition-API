@@ -1,22 +1,19 @@
---extra-index-url https://download.pytorch.org/whl/cu118
---extra-index-url https://pypi.org/simple
-
-torch
-torchvision
-torchaudio
-
-inference-sdk
-tqdm
-pillow
-pandas
-opencv-python
-matplotlib
-requests
-editdistance
-scikit-learn
-
-
+# --- Web API ---
 fastapi
 uvicorn
 python-multipart
+python-dotenv
 
+# --- Logic & Processing ---
+inference-sdk
+opencv-python-headless
+pillow
+numpy
+pandas
+editdistance
+requests
+
+# --- Training / ML Utils (แต่ไม่รวม Torch ตัวหลัก) ---
+scikit-learn
+matplotlib
+tqdm

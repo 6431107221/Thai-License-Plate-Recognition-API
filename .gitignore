@@ -8,6 +8,7 @@ OCR-Car-Plate_dataset/
 *.zip
 *.pyc
 __pycache__/
+.env/
 
 debug_images/
 crops_all/
