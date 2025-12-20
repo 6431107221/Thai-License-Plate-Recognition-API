@@ -36,7 +36,7 @@ class SmartResize:
             new_h = int(h * scale)
             new_w = int(w * scale)
 
-        img = img.resize((new_w, new_h), resample=Image.BICUBIC)
+        img = img.resize((new_w, new_h), resample=Image.Resampling.BICUBIC)
 
         # 3. Create Background & Paste (Padding)
         # สร้างภาพพื้นหลังสีดำ (หรือสีเทาค่า 0)
