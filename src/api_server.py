@@ -97,8 +97,10 @@ class LicensePlateService:
     def preprocess_image_simple(self, pil_img):
         # 1. Convert to Grayscale
         gray = pil_img.convert("L")
-        # 2. Auto Contrast
-        gray = ImageOps.autocontrast(gray)
+        
+        # NOTE: Training data is raw/pixelated. 
+        # AutoContrast amplifies noise in low-res images, so we remove it to match training distribution.
+        # gray = ImageOps.autocontrast(gray) 
         
         return gray
 
@@ -115,7 +117,7 @@ class LicensePlateService:
         
         try:
             res_plate = self.rf_client.infer(str(temp_path), model_id=cfg.MODEL_DETECTION_ID)
-            preds = res_plate.get('predictions', [])
+            preds = res_plate['predictions'] if isinstance(res_plate, dict) else res_plate
         except Exception as e:
             if temp_path.exists(): os.remove(temp_path)
             return {"error": f"Model 1 Error: {e}"}
@@ -141,7 +143,7 @@ class LicensePlateService:
         plate_crop.save(temp_path)
         try:
             res_comp = self.rf_client.infer(str(temp_path), model_id=cfg.MODEL_OCR_PREP_ID)
-            preds_comp = res_comp.get('predictions', [])
+            preds_comp = res_comp['predictions'] if isinstance(res_comp, dict) else res_comp
         except:
             preds_comp = []
         
@@ -221,3 +223,7 @@ async def startup_event():
 async def detect_endpoint(file: UploadFile = File(...)):
     image_data = await file.read()
     return await service.predict(image_data)
+
+# if __name__ == "__main__":
+    # import uvicorn
+    # uvicorn.run("src.api_server:app", host="127.0.0.1", port=8000, reload=True)
