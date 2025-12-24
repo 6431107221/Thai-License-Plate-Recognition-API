@@ -1,5 +1,25 @@
-# .dockerignore
+
 .git
+.gitignore
+.dockerignore
+.env
 .venv
 __pycache__
-temp_* debug_images/
+*.pyc
+*.pyo
+*.pyd
+
+# Datasets & Temporary Files
+yolo_datasets/
+crops_all/
+debug_api/
+debug_images/
+yolo_train_runs/
+
+# Large Model Files (Unless needed for inference, handle with care)
+# If you download weights inside Dockerfile or mount them, ignore them here.
+# But for now, we assume we COPY weights/ folder.
+# weights/*.pt (Only ignore if you download at runtime)
+
+test_evaluation_results.csv
+README.md

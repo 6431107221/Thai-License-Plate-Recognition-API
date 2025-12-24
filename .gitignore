@@ -1,18 +1,31 @@
-venv/
 
-OCR-Car-Plate_dataset/
-
-*.jpg
-*.png
-*.pth
-*.zip
-*.pyc
+# Python
 __pycache__/
-.env/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+env/
+venv/
+.env
 
-debug_images/
+# Models & Data
+weights/*.pt
+!weights/.gitkeep
+yolo_datasets/
 crops_all/
-final_results.csv
-train_unified.csv
-val_unified.csv
-test_unified.csv
+yolo_train_runs/
+
+# Logs & Debug
+*.log
+debug_api/
+debug_images/
+test_evaluation_results.csv
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

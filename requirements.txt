@@ -5,7 +5,7 @@ python-multipart
 python-dotenv
 
 # --- Logic & Processing ---
-inference-sdk
+ultralytics
 opencv-python-headless
 pillow
 numpy
@@ -13,7 +13,7 @@ pandas
 editdistance
 requests
 
-# --- Training / ML Utils (แต่ไม่รวม Torch ตัวหลัก) ---
+# --- Training / ML Utils ---
 scikit-learn
 matplotlib
 tqdm
