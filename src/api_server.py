@@ -1,3 +1,4 @@
+
 # src/api_server.py
 from fastapi import FastAPI, UploadFile, File
 from PIL import Image, ImageOps
@@ -7,211 +8,171 @@ import json
 import numpy as np
 import time
 import os
-
-from inference_sdk import InferenceHTTPClient
+from ultralytics import YOLO
+import torch.nn.functional as F
 
 # Import Config และ Modules
 from src.config import cfg
-from src.models import ResNetCRNN, ProvinceClassifier
-from src.utils import beam_search_decode
-from src.datasets import get_ocr_transforms, get_prov_transforms
+from src.models import ResNetCRNN, ProvinceClassifier, best_path_decode
+from src.preprocess import preprocess_raw_image, get_ocr_transforms, get_prov_transforms
 
-app = FastAPI()
+import shutil
+
+app = FastAPI(title="Thai LPR API Service")
+
+# Setup Debug Directory
+DEBUG_API_DIR = cfg.DEBUG_IMAGE_DIR
 
 class LicensePlateService:
     def __init__(self):
-        print("🚀 Initializing Service...")
+        print("Initializing Local LPR Service (Synced with latest models)...")
         self.device = cfg.DEVICE
         
-        # 1. Initialize Roboflow
-        self.rf_client = InferenceHTTPClient(
-            api_url="https://detect.roboflow.com", 
-            api_key=cfg.RF_API_KEY
-        )
+        # Ensure debug directory exists
+        if DEBUG_API_DIR.exists():
+            shutil.rmtree(DEBUG_API_DIR)
+        DEBUG_API_DIR.mkdir(parents=True, exist_ok=True)
         
-        # 2. Load Char Map
-        self.int_to_char = {}
-        if cfg.CHAR_MAP_PATH.exists():
-            with open(cfg.CHAR_MAP_PATH, 'r', encoding='utf-8') as f:
-                self.int_to_char = json.load(f)
-        else:
-            print(f"Critical Error: Char map not found at {cfg.CHAR_MAP_PATH}")
+        # 1. Load Local YOLO Models
+        try:
+            self.model_plate = YOLO(cfg.MODEL_DETECTION_PATH)
+            self.model_comp  = YOLO(cfg.MODEL_OCR_PREP_PATH)
+            print("   YOLO Models Loaded")
+        except Exception as e:
+            print(f"   Error loading YOLO: {e}")
 
-        # 3. Load Models
-        self.ocr_model = self._load_ocr_model()
-        self.prov_model, self.prov_idx2prov = self._load_prov_model()
+        # 2. Load Engine Models (OCR & Province) with Embedded Maps
+        self.ocr_model, self.int_to_char = self._load_ocr_engine()
+        self.prov_model, self.i2p = self._load_prov_engine()
         
-        # 4. Load Transforms
+        # 3. Transforms
         self.tf_ocr = get_ocr_transforms(is_train=False)
         self.tf_prov = get_prov_transforms(is_train=False)
 
-        print("Service Ready!")
+        print("Service is UP and READY!")
 
-    def _load_ocr_model(self):
-        path = cfg.OCR_MODEL_SAVE_PATH if cfg.OCR_MODEL_SAVE_PATH.exists() else cfg.OCR_PRETRAINED_PATH
-        print(f"Loading OCR Model from: {path}")
+    def _load_ocr_engine(self):
+        print("   Loading OCR Engine...")
+        if not cfg.OCR_MODEL_SAVE_PATH.exists():
+            print(f"   OCR model not found: {cfg.OCR_MODEL_SAVE_PATH}")
+            return None, {}
+            
+        ckpt = torch.load(cfg.OCR_MODEL_SAVE_PATH, map_location=self.device)
+        state_dict = ckpt.get("model_state_dict", ckpt.get("model", ckpt))
+        int_to_char = ckpt.get("int_to_char", {})
         
-        model = ResNetCRNN(1, len(self.int_to_char), hidden_size=256).to(self.device)
-        
-        if path.exists():
-            try:
-                ckpt = torch.load(path, map_location=self.device, weights_only=True)
-                state = ckpt.get('model_state_dict', ckpt)
-                model.load_state_dict(state)
-                model.eval()
-                print("   OCR Loaded Successfully")
-            except Exception as e:
-                print(f"   OCR Load Failed: {e}")
-        else:
-             print("   No OCR model file found! Using random weights.")
-        return model
+        model = ResNetCRNN(img_channel=1, num_classes=len(int_to_char)).to(self.device)
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model, int_to_char
 
-    def _load_prov_model(self):
-        path = cfg.PROV_MODEL_SAVE_PATH if cfg.PROV_MODEL_SAVE_PATH.exists() else cfg.PROV_PRETRAINED_PATH
-        print(f"Loading Province Model from: {path}")
+    def _load_prov_engine(self):
+        print("   Loading Province Engine...")
+        if not cfg.PROV_MODEL_SAVE_PATH.exists():
+            print(f"   Province model not found: {cfg.PROV_MODEL_SAVE_PATH}")
+            return None, {}
+            
+        ckpt = torch.load(cfg.PROV_MODEL_SAVE_PATH, map_location=self.device)
+        class_map = ckpt.get("class_map", {})
+        i2p = {int(k) if str(k).isdigit() else k: v for k, v in class_map.items()}
+        state_dict = ckpt.get("model_state", ckpt.get("model", ckpt))
         
-        idx2prov = {}
-        model = ProvinceClassifier(77).to(self.device)
-        
-        if path.exists():
-            try:
-                ckpt = torch.load(path, map_location=self.device, weights_only=False)
-                
-                if "class_map" in ckpt:
-                    idx2prov = {int(k): v for k, v in ckpt["class_map"].items()}
-                    model = ProvinceClassifier(len(idx2prov)).to(self.device)
-                
-                state = ckpt.get('model_state', ckpt)
-                new_state = {f"model.{k}" if not k.startswith("model.") else k: v for k, v in state.items()}
-                
-                model.load_state_dict(new_state, strict=False)
-                model.eval()
-                print("   Province Loaded Successfully")
-            except Exception as e:
-                print(f"   Province Load Failed: {e}")
-        else:
-             print("   No Province model file found!")
-        return model, idx2prov
-
-    # Preprocess
-    def preprocess_image_simple(self, pil_img):
-        # 1. Convert to Grayscale
-        gray = pil_img.convert("L")
-        
-        # NOTE: Training data is raw/pixelated. 
-        # AutoContrast amplifies noise in low-res images, so we remove it to match training distribution.
-        # gray = ImageOps.autocontrast(gray) 
-        
-        return gray
+        model = ProvinceClassifier(n_classes=len(class_map)).to(self.device)
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model, i2p
 
     async def predict(self, image_bytes):
-        req_id = int(time.time())
+        # Clear debug dir for new request
+        if DEBUG_API_DIR.exists():
+            for f in DEBUG_API_DIR.glob("*"):
+                if f.is_file(): f.unlink()
         
-        # 1. Read Image
+        start_time = time.time()
         raw_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        if cfg.DEBUG_MODE: raw_img.save(cfg.DEBUG_IMAGE_DIR / f"{req_id}_0_raw.jpg")
+        raw_img.save(DEBUG_API_DIR / "0_input_raw.jpg")
 
-        # 2. RF Detect Plate (Model 1)
-        temp_path = cfg.DEBUG_IMAGE_DIR / "temp_rf.jpg"
-        raw_img.save(temp_path)
-        
-        try:
-            res_plate = self.rf_client.infer(str(temp_path), model_id=cfg.MODEL_DETECTION_ID)
-            preds = res_plate['predictions'] if isinstance(res_plate, dict) else res_plate
-        except Exception as e:
-            if temp_path.exists(): os.remove(temp_path)
-            return {"error": f"Model 1 Error: {e}"}
+        # 1. YOLO Plate Detect
+        results_plate = self.model_plate(raw_img, verbose=False)[0]
+        if len(results_plate.boxes) == 0:
+            return {"status": "error", "message": "No license plate detected"}
 
-        if not preds:
-            if temp_path.exists(): os.remove(temp_path)
-            return {"status": "no_plate_found"}
-        
-        best_plate = max(preds, key=lambda x: x['confidence'])
-        x, y, w, h = best_plate['x'], best_plate['y'], best_plate['width'], best_plate['height']
-        
-        W, H = raw_img.size
-        margin = 0.05 
-        x1 = max(0, int(x - w/2 - w*margin))
-        y1 = max(0, int(y - h/2 - h*margin))
-        x2 = min(W, int(x + w/2 + w*margin))
-        y2 = min(H, int(y + h/2 + h*margin))
-        
-        plate_crop = raw_img.crop((x1, y1, x2, y2))
-        if cfg.DEBUG_MODE: plate_crop.save(cfg.DEBUG_IMAGE_DIR / f"{req_id}_1_plate.jpg")
+        detections = []
+        for i, box in enumerate(results_plate.boxes):
+            conf_plate = float(box.conf[0])
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            plate_crop = raw_img.crop((x1, y1, x2, y2))
+            plate_crop.save(DEBUG_API_DIR / f"1_plate_crop_{i}.jpg")
 
-        # 3. Detect Components (Model 2)
-        plate_crop.save(temp_path)
-        try:
-            res_comp = self.rf_client.infer(str(temp_path), model_id=cfg.MODEL_OCR_PREP_ID)
-            preds_comp = res_comp['predictions'] if isinstance(res_comp, dict) else res_comp
-        except:
-            preds_comp = []
-        
-        if temp_path.exists(): os.remove(temp_path)
-
-        license_crop = None
-        province_crop = None
-        pW, pH = plate_crop.size
-        
-        for pred in preds_comp:
-            cls = pred['class']
-            px, py, pw, ph_box = pred['x'], pred['y'], pred['width'], pred['height']
+            # 2. YOLO Component
+            results_comp = self.model_comp(plate_crop, verbose=False)[0]
             
-            bx1 = max(0, int(px - pw/2))
-            by1 = max(0, int(py - ph_box/2))
-            bx2 = min(pW, int(px + pw/2))
-            by2 = min(pH, int(py + ph_box/2))
-            
-            comp_img = plate_crop.crop((bx1, by1, bx2, by2))
-            
-            if "Plate" in cls:
-                license_crop = comp_img
-            elif "Province" in cls:
-                province_crop = comp_img
+            ocr_crop = None
+            prov_crop = None
 
-        # Fallback
-        if not license_crop:
-            license_crop = plate_crop.crop((0, 0, pW, int(pH*0.65)))
-        if not province_crop:
-            province_crop = plate_crop.crop((0, int(pH*0.6), pW, pH))
+            for j, c_box in enumerate(results_comp.boxes):
+                cls_idx = int(c_box.cls[0])
+                cls_name = self.model_comp.names[cls_idx]
+                bx1, by1, bx2, by2 = c_box.xyxy[0].cpu().numpy().astype(int)
+                comp_img = plate_crop.crop((bx1, by1, bx2, by2))
+                
+                if "Plate" in cls_name: 
+                    ocr_crop = comp_img
+                    ocr_crop.save(DEBUG_API_DIR / f"2_ocr_target_{i}.jpg")
+                elif "Province" in cls_name: 
+                    prov_crop = comp_img
+                    prov_crop.save(DEBUG_API_DIR / f"3_prov_target_{i}.jpg")
 
-        # 4. Preprocess 
-        ocr_input = self.preprocess_image_simple(license_crop)
-        prov_input = self.preprocess_image_simple(province_crop)
+            # Fallback crops logic (if YOLO components fail)
+            pW, pH = plate_crop.size
+            if not ocr_crop: 
+                ocr_crop = plate_crop.crop((0, 0, pW, int(pH*0.65)))
+                
+            if not prov_crop: 
+                prov_crop = plate_crop.crop((0, int(pH*0.6), pW, pH))
+                prov_crop.save(DEBUG_API_DIR / f"3_prov_target_{i}_fallback.jpg")
 
-        if cfg.DEBUG_MODE:
-            ocr_input.save(cfg.DEBUG_IMAGE_DIR / f"{req_id}_2_ocr_input.jpg")
-            prov_input.save(cfg.DEBUG_IMAGE_DIR / f"{req_id}_3_prov_input.jpg")
+            # PREPROCESSING ENHANCEMENT
+            ocr_crop = ImageOps.autocontrast(ocr_crop, cutoff=1)
+            ocr_crop.save(DEBUG_API_DIR / f"2_ocr_target_{i}_enhanced.jpg")
 
-        # 5. Inference
-        result = {
-            "Plate": "", 
-            "Province": "",
-            "Conf_Prov": 0.0
+            # 3. Engines Inference
+            plate_text = ""
+            province_name = "Unknown"
+            conf_prov = 0.0
+
+            # OCR Inference
+            ts_ocr = self.tf_ocr(ocr_crop).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                out_ocr = self.ocr_model(ts_ocr)
+                plate_text = best_path_decode(out_ocr.softmax(-1), self.int_to_char)[0]
+
+            # Province Inference
+            ts_prov = self.tf_prov(prov_crop).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                out_prov = self.prov_model(ts_prov)
+                probs = F.softmax(out_prov, dim=1)
+                p_conf, p_idx = probs.max(1)
+                province_name = self.i2p.get(p_idx.item(), "Unknown")
+                conf_prov = float(p_conf.item())
+
+            detections.append({
+                "plate_text": plate_text,
+                "province": province_name,
+                "confidence": {
+                    "plate_detection": conf_plate,
+                    "province": conf_prov
+                },
+                "box": [int(x1), int(y1), int(x2), int(y2)]
+            })
+
+        return {
+            "status": "success",
+            "results": detections,
+            "latency_ms": int((time.time() - start_time) * 1000)
         }
 
-        try:
-            ts = self.tf_ocr(ocr_input).unsqueeze(0).to(self.device)
-            with torch.no_grad():
-                out = self.ocr_model(ts)
-                result["Plate"] = beam_search_decode(out[0].log_softmax(-1), self.int_to_char)
-        except Exception as e:
-            print(f"OCR Error: {e}")
-
-        try:
-            ts = self.tf_prov(prov_input).unsqueeze(0).to(self.device)
-            with torch.no_grad():
-                out = self.prov_model(ts)
-                probs = torch.softmax(out, dim=1)
-                conf, idx = probs.max(1)
-                result["Province"] = self.prov_idx2prov.get(idx.item(), str(idx.item()))
-                result["Conf_Prov"] = float(conf.item())
-        except Exception as e:
-            print(f"Prov Error: {e}")
-
-        return result
-
-# --- Init ---
+# --- Shared instances ---
 service = None
 
 @app.on_event("startup")
@@ -224,6 +185,6 @@ async def detect_endpoint(file: UploadFile = File(...)):
     image_data = await file.read()
     return await service.predict(image_data)
 
-# if __name__ == "__main__":
-    # import uvicorn
-    # uvicorn.run("src.api_server:app", host="127.0.0.1", port=8000, reload=True)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
