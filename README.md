@@ -1,4 +1,3 @@
-
 # Thai License Plate Recognition API
 
 A high-performance microservice for Thai license plate detection and recognition. This system utilizes a multi-stage deep learning pipeline to extract plate numbers and province names from images.
