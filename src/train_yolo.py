@@ -4,25 +4,15 @@ from src.config import cfg
 from pathlib import Path
 
 def train_detection(epochs=100):
-    """
-    Train Model 1: Plate Detection
-    Config:
-    - Resize: 640x640
-    - Augs: Brightness +/- 25%, Blur 1px, Noise
-    """
-    print("\nStarting Model 1: Detection Training...")
+    print("\nStarting Model 1: Detection")
     
-    # Path to data.yaml
     data_path = cfg.PROJECT_ROOT / "yolo_datasets" / "detection" / "data.yaml"
     if not data_path.exists():
         print(f"Data file not found: {data_path}")
         return
 
-    model = YOLO("yolo11n.pt") # Load pretrained Nano model
+    model = YOLO("yolo11n.pt")
 
-    # Hyperparameters mapping to user request
-    # Brightness +/- 25% -> hsv_v = 0.25
-    
     model.train(
         data=str(data_path),
         epochs=epochs,
@@ -31,44 +21,32 @@ def train_detection(epochs=100):
         project="yolo_train_runs",
         name="det_model",
         exist_ok=True,
-        # --- Augmentations ---
-        hsv_v=0.25,        # Brightness (+/- 25%)
-        erasing=0.0,       # No erasing
-        mosaic=1.0,        # Use Mosaic
+        hsv_v=0.25,
+        erasing=0.0,
+        mosaic=1.0,
     )
     print("Detection Training Completed.")
 
 def train_segmentation(epochs=100):
-    """
-    Train Model 2: Component Segmentation
-    Config:
-    - Resize: 320x320
-    - Augs: Rotation +/- 5 deg, Blur
-    """
-    print("\nStarting Model 2: Segmentation Training...")
+    print("\nStarting Model 2: Segmentation")
     
-    # Path to data.yaml
     data_path = cfg.PROJECT_ROOT / "yolo_datasets" / "segmentation" / "data.yaml"
     if not data_path.exists():
         print(f"Data file not found: {data_path}")
         return
     
-    model = YOLO("yolo11n-seg.pt") # Load pretrained Nano Segmentation model
+    model = YOLO("yolo11n-seg.pt")
 
-    # Hyperparameters mapping
-    # Rotation +/- 5 deg -> degrees = 5
-    
     model.train(
         data=str(data_path),
         epochs=epochs,
-        imgsz=320,         # User specified 320x320
+        imgsz=320,
         device=0 if cfg.DEVICE.type == 'cuda' else 'cpu',
         project="yolo_train_runs",
         name="seg_model",
         exist_ok=True,
-        # --- Augmentations ---
-        degrees=5.0,       # Rotation +/- 5 deg
-        hsv_v=0.0,         # Disable brightness aug (user didn't ask for it here)
+        degrees=5.0,
+        hsv_v=0.0,
         mosaic=1.0,
     )
     print("Segmentation Training Completed.")
