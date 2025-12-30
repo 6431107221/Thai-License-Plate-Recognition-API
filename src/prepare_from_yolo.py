@@ -6,38 +6,36 @@ from tqdm import tqdm
 
 # --- Config ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# Input: Where Roboflow dataset is
+# Input:
 YOLO_SEG_ROOT = PROJECT_ROOT / "yolo_datasets" / "segmentation"
-# Output: Where cropped images will be saved
+# Output
 OUTPUT_ROOT = PROJECT_ROOT / "crops_all"
 
-# YOLO Class Mapping (Must match your data.yaml)
-CLS_PLATE = 0    
-CLS_PROV = 1     
+CLASS_PLATE = 0    
+CLASS_PROV = 1     
 
 def yolo_to_bbox(line, img_w, img_h):
-    """Convert YOLO format line (box or polygon) to [x1, y1, x2, y2]"""
     parts = line.split()
-    cls = int(parts[0])
+    class_id = int(parts[0])
     
     if len(parts) > 5:
         # Polygon Format
-        coords = list(map(float, parts[1:]))
+        coords = [float(x) for x in parts[1:]]
         xs = coords[::2]
         ys = coords[1::2]
         x_min = min(xs) * img_w
         x_max = max(xs) * img_w
         y_min = min(ys) * img_h
         y_max = max(ys) * img_h
-        return cls, [int(x_min), int(y_min), int(x_max), int(y_max)]
+        return class_id, [int(x_min), int(y_min), int(x_max), int(y_max)]
     else:
-        # Detection Format
-        x_c, y_c, w, h = map(float, parts[1:5])
+        # Square Format
+        x_c, y_c, w, h = [float(x) for x in parts[1:5]]
         x1 = int((x_c - w/2) * img_w)
         y1 = int((y_c - h/2) * img_h)
         x2 = int((x_c + w/2) * img_w)
         y2 = int((y_c + h/2) * img_h)
-        return cls, [max(0, x1), max(0, y1), min(img_w, x2), min(img_h, y2)]
+        return class_id, [max(0, x1), max(0, y1), min(img_w, x2), min(img_h, y2)]
 
 def process_split(split_name):
     img_dir = YOLO_SEG_ROOT / split_name / "images"
@@ -81,9 +79,9 @@ def process_split(split_name):
             
             if crop.size == 0: continue
 
-            if cls == CLS_PLATE: 
+            if cls == CLASS_PLATE: 
                 plate_crop = crop
-            elif cls == CLS_PROV: 
+            elif cls == CLASS_PROV: 
                 prov_crop = crop
         
         if plate_crop is not None:
@@ -108,8 +106,6 @@ def process_split(split_name):
     return records
 
 def main():
-    print("Starting Data Preparation (Cropping Only)...")
-
     for split in ["train", "valid", "test"]:
         if (YOLO_SEG_ROOT / split).exists():
             records = process_split(split)
@@ -121,8 +117,6 @@ def main():
                 out_csv_path = OUTPUT_ROOT / split / csv_filename
                 df.to_csv(out_csv_path, index=False, encoding='utf-8-sig')
                 print(f"   Saved CSV Template: {out_csv_path} ({len(df)} rows)")
-
-    print("\nAll Done! Images cropped. Please fill in the CSV labels manually or via script.")
 
 if __name__ == "__main__":
     main()

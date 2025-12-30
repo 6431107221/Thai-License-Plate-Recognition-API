@@ -14,7 +14,7 @@ import torch.nn.functional as F
 # Import Config และ Modules
 from src.config import cfg
 from src.models import ResNetCRNN, ProvinceClassifier, best_path_decode
-from src.preprocess import preprocess_raw_image, get_ocr_transforms, get_prov_transforms
+from src.preprocess import preprocess_raw_api_image, get_ocr_transforms, get_prov_transforms
 
 import shutil
 
@@ -89,7 +89,9 @@ class LicensePlateService:
                 if f.is_file(): f.unlink()
         
         start_time = time.time()
-        raw_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        raw_img = preprocess_raw_api_image(image_bytes)
+        if raw_img is None:
+            return {"status": "error", "message": "Failed to decode image bytes"}
         raw_img.save(DEBUG_API_DIR / "0_input_raw.jpg")
 
         # 1. YOLO Plate Detect

@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import random
 from pathlib import Path
-from preprocess import preprocess_raw_image, get_prov_transforms
+from preprocess import get_prov_transforms
 
 class OCRDataset(Dataset):
     def __init__(self, df, root, char_map, transform=None):
@@ -23,8 +23,7 @@ class OCRDataset(Dataset):
         row = self.df.iloc[idx]
         img_path = self.root / row["image"]
         try:
-            pil_img = Image.open(img_path).convert("RGB")
-            img = preprocess_raw_image(pil_img)
+            img = Image.open(img_path).convert("RGB")
         except:
             img = Image.new('RGB', (256, 64))
 
@@ -58,8 +57,7 @@ class ProvinceDataset(Dataset):
         img_path = self.root / img_rel_prov
         
         try:
-            pil_img = Image.open(img_path).convert("RGB")
-            img = preprocess_raw_image(pil_img)
+            img = Image.open(img_path).convert("RGB")
         except:
             img = Image.new('RGB', (224, 224))
             
