@@ -1,12 +1,13 @@
 import torch
+from tqdm.auto import tqdm
+import torch.nn.functional as F
+
 import pandas as pd
 import numpy as np
-from pathlib import Path
+
 from PIL import Image
 import json
 import editdistance
-from tqdm.auto import tqdm
-import torch.nn.functional as F
 
 # Import Local Modules
 from config import cfg
@@ -27,14 +28,9 @@ def main():
         
     ocr_ckpt = torch.load(cfg.OCR_MODEL_SAVE_PATH, map_location=cfg.DEVICE)
     
-    # ดึง Char Map จากห่อ (ถ้าไม่มีค่อยไปหาไฟล์แยก)
-    if isinstance(ocr_ckpt, dict) and "int_to_char" in ocr_ckpt:
-        int_to_char = ocr_ckpt["int_to_char"]
-        print(f" ✅ Using EMBEDDED char map from checkpoint ({len(int_to_char)} chars)")
-    else:
-        print(" ⚠️ No embedded char map found, falling back to disk...")
-        with open(cfg.CHAR_MAP_PATH, 'r', encoding='utf-8') as f:
-            int_to_char = json.load(f)
+    with open(cfg.CHAR_MAP_PATH, 'r', encoding='utf-8') as f:
+        int_to_char = json.load(f)
+    print(f" ✅ Using char map from {cfg.CHAR_MAP_PATH} ({len(int_to_char)} chars)")
 
     # ดึง Weights จากห่อ
     if isinstance(ocr_ckpt, dict):
@@ -55,19 +51,17 @@ def main():
         
     prov_ckpt = torch.load(cfg.PROV_MODEL_SAVE_PATH, map_location=cfg.DEVICE)
     
-    # ดึง Class Map จากห่อ
-    if isinstance(prov_ckpt, dict) and "class_map" in prov_ckpt:
-        class_map = prov_ckpt["class_map"]
-        # Ensure correct mapping {Index: ProvName}
-        int_to_char_prov = {int(k) if str(k).isdigit() else k: v for k, v in class_map.items()}
-        print(f" ✅ Using EMBEDDED class map from checkpoint ({len(class_map)} classes)")
-    else:
-        print(" ❌ Error: Province checkpoint must contain 'class_map'")
+    # Load Class Map from JSON
+    if not cfg.PROV_MAP_PATH.exists():
+        print(f"Error: Province map not found at {cfg.PROV_MAP_PATH}")
         return
+    with open(cfg.PROV_MAP_PATH, 'r', encoding='utf-8') as f:
+        int_to_char_prov = json.load(f)
+    print(f" ✅ Using class map from {cfg.PROV_MAP_PATH} ({len(int_to_char_prov)} classes)")
 
     # ดึง Weights จากห่อ
     state_dict = prov_ckpt.get("model_state", prov_ckpt.get("model", prov_ckpt))
-    prov_model = ProvinceClassifier(n_classes=len(class_map)).to(cfg.DEVICE)
+    prov_model = ProvinceClassifier(n_classes=len(int_to_char_prov)).to(cfg.DEVICE)
     prov_model.load_state_dict(state_dict)
     prov_model.eval()
     print(" ✅ Province Model Weights Loaded")
@@ -89,16 +83,16 @@ def main():
     
     # 4. Evaluation Loop
     with torch.no_grad():
-        for _, row in tqdm(test_df.iterrows(), total=len(test_df)):
-            ocr_rel_path = row["image"]
+        for row in tqdm(test_df.itertuples(index=False), total=len(test_df)):
+            ocr_rel_path = row.image
             ocr_full_path = cfg.CROPS_DIR / ocr_rel_path
             
             prov_rel_path = ocr_rel_path.replace("/plates/", "/provs/").replace("_plate", "_prov")
             prov_full_path = cfg.CROPS_DIR / prov_rel_path
-
-            gt_plate = str(row["gt_plate"]).strip()
-            gt_prov = str(row["gt_province"]).strip()
-
+ 
+            gt_plate = str(row.gt_plate).strip()
+            gt_prov = str(row.gt_province).strip()
+ 
             # Predict OCR
             pred_plate = ""
             if ocr_full_path.exists():
@@ -121,7 +115,7 @@ def main():
                     pred_prov = int_to_char_prov.get(idx, "Unknown")
                 except Exception as e:
                     pass
-
+ 
             # Metrics
             cer = editdistance.eval(pred_plate, gt_plate) / max(1, len(gt_plate))
             prov_acc = 1 if pred_prov == gt_prov else 0

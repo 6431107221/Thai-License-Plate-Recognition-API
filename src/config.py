@@ -24,6 +24,7 @@ class Config:
 
     # Misc
     CHAR_MAP_PATH = WEIGHTS_DIR / "int_to_char.json"
+    PROV_MAP_PATH = WEIGHTS_DIR / "province_map.json"
     IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
     # --- Hyperparameters ---
