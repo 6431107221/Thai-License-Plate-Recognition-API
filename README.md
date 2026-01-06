@@ -19,6 +19,10 @@ A high-performance microservice for Thai license plate detection and recognition
 2. Segmentation: Separate the plate number and province area.
 3. Recognition: OCR for characters and Classification for province.
 
+![val_batch2_pred](https://github.com/user-attachments/assets/74c61b4c-eb9b-498e-bde5-82208c755cb5)
+
+![val_batch1_pred](https://github.com/user-attachments/assets/25f84e37-ec9d-4b36-9509-ac83e88542de)
+
 ## Quick Start
 1. Install dependencies:
    ```bash
