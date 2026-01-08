@@ -164,8 +164,7 @@ class LicensePlateService:
                 "confidence": {
                     "plate_detection": conf_plate,
                     "province": conf_prov
-                },
-                "box": [int(x1), int(y1), int(x2), int(y2)]
+                }
             })
 
         return {

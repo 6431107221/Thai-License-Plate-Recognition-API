@@ -1,142 +1,126 @@
 import torch 
-from tqdm.auto import tqdm
-import torch.nn.functional as F
-
 import pandas as pd
 import numpy as np
-
-from PIL import Image
 import json
 import editdistance
+import argparse
+from pathlib import Path
+from tqdm.auto import tqdm
+from PIL import Image
 
 # Import Local Modules
-from config import cfg
-from models import ResNetCRNN, ProvinceClassifier, best_path_decode
-from preprocess import get_ocr_transforms, get_prov_transforms
+from src.config import cfg
+from src.models import ResNetCRNN, ProvinceClassifier, best_path_decode
+from src.preprocess import get_ocr_transforms, get_prov_transforms
 
-def main():
-    print(f"=== Starting Evaluation on Test Set ===")
-    print(f"Device: {cfg.DEVICE}")
-
-    # 1. Load Models & Metadata from .pth files (The Triple Truth)
-    
-    # --- OCR ---
-    print("Loading OCR Model and Embedded Char Map...")
-    if not cfg.OCR_MODEL_SAVE_PATH.exists():
-        print(f"Error: OCR model not found at {cfg.OCR_MODEL_SAVE_PATH}")
-        return
+class LPREvaluator:
+    def __init__(self, device=cfg.DEVICE):
+        print("\n=== LPR Evaluator Initializing ===")
+        self.device = device
         
-    ocr_ckpt = torch.load(cfg.OCR_MODEL_SAVE_PATH, map_location=cfg.DEVICE)
-    
-    with open(cfg.CHAR_MAP_PATH, 'r', encoding='utf-8') as f:
-        int_to_char = json.load(f)
-    print(f" Using char map from {cfg.CHAR_MAP_PATH} ({len(int_to_char)} chars)")
-
-    # ดึง Weights จากห่อ
-    if isinstance(ocr_ckpt, dict):
-        state_dict = ocr_ckpt.get("model_state_dict", ocr_ckpt.get("model", ocr_ckpt))
-    else:
-        state_dict = ocr_ckpt
+        self._load_mappings()
         
-    ocr_model = ResNetCRNN(img_channel=1, num_classes=len(int_to_char)).to(cfg.DEVICE)
-    ocr_model.load_state_dict(state_dict)
-    ocr_model.eval()
-    print(" OCR Model Weights Loaded")
-
-    # --- Province ---
-    print("Loading Province Model and Embedded Class Map...")
-    if not cfg.PROV_MODEL_SAVE_PATH.exists():
-        print(f"Error: Province model not found at {cfg.PROV_MODEL_SAVE_PATH}")
-        return
+        self._setup_models()
         
-    prov_ckpt = torch.load(cfg.PROV_MODEL_SAVE_PATH, map_location=cfg.DEVICE)
-    
-    # Load Class Map from JSON
-    if not cfg.PROV_MAP_PATH.exists():
-        print(f"Error: Province map not found at {cfg.PROV_MAP_PATH}")
-        return
-    with open(cfg.PROV_MAP_PATH, 'r', encoding='utf-8') as f:
-        int_to_char_prov = json.load(f)
-    print(f" Using class map from {cfg.PROV_MAP_PATH} ({len(int_to_char_prov)} classes)")
+        self.tf_ocr = get_ocr_transforms(is_train=False)
+        self.tf_prov = get_prov_transforms(is_train=False)
 
-    # ดึง Weights จากห่อ
-    state_dict = prov_ckpt.get("model_state", prov_ckpt.get("model", prov_ckpt))
-    prov_model = ProvinceClassifier(n_classes=len(int_to_char_prov)).to(cfg.DEVICE)
-    prov_model.load_state_dict(state_dict)
-    prov_model.eval()
-    print(" Province Model Weights Loaded")
-
-    # 3. Load Test Data
-    if not cfg.TEST_CSV.exists():
-        print(f"Test CSV not found: {cfg.TEST_CSV}")
-        return
-        
-    test_df = pd.read_csv(cfg.TEST_CSV).fillna("")
-    test_df = test_df[test_df['image'] != ""]
-    print(f"Found {len(test_df)} test samples in CSV")
-
-    # Transforms
-    tf_ocr = get_ocr_transforms(is_train=False)
-    tf_prov = get_prov_transforms(is_train=False)
-
-    results = []
-    
-    # 4. Evaluation Loop
-    with torch.no_grad():
-        for row in tqdm(test_df.itertuples(index=False), total=len(test_df)):
-            ocr_rel_path = row.image
-            ocr_full_path = cfg.CROPS_DIR / ocr_rel_path
+    def _load_mappings(self):
+        # OCR Mapping
+        if not cfg.CHAR_MAP_PATH.exists():
+            raise FileNotFoundError(f"OCR char_map not found at {cfg.CHAR_MAP_PATH}")
+        with open(cfg.CHAR_MAP_PATH, 'r', encoding='utf-8') as f:
+            self.int_to_char = json.load(f)
             
-            prov_rel_path = ocr_rel_path.replace("/plates/", "/provs/").replace("_plate", "_prov")
-            prov_full_path = cfg.CROPS_DIR / prov_rel_path
- 
-            gt_plate = str(row.gt_plate).strip()
-            gt_prov = str(row.gt_province).strip()
- 
-            # Predict OCR
-            pred_plate = ""
-            if ocr_full_path.exists():
-                try:
-                    img = Image.open(ocr_full_path).convert("RGB")
-                    t_img = tf_ocr(img).unsqueeze(0).to(cfg.DEVICE)
-                    output = ocr_model(t_img)
-                    pred_plate = best_path_decode(output.softmax(-1), int_to_char)[0]
-                except Exception as e:
-                    pass
+        # Province Mapping
+        if not cfg.PROV_MAP_PATH.exists():
+            raise FileNotFoundError(f"Province map not found at {cfg.PROV_MAP_PATH}")
+        with open(cfg.PROV_MAP_PATH, 'r', encoding='utf-8') as f:
+            self.int_to_prov = json.load(f)
+
+    def _setup_models(self):
+        # OCR Model
+        self.ocr_model = ResNetCRNN(img_channel=1, num_classes=len(self.int_to_char)).to(self.device)
+        if cfg.OCR_MODEL_SAVE_PATH.exists():
+            ckpt = torch.load(cfg.OCR_MODEL_SAVE_PATH, map_location=self.device)
+            state_dict = ckpt.get("model_state_dict", ckpt.get("model", ckpt))
+            self.ocr_model.load_state_dict(state_dict)
+            print(f" Loaded OCR Weights from {cfg.OCR_MODEL_SAVE_PATH.name}")
+        self.ocr_model.eval()
+
+        # Province Model
+        self.prov_model = ProvinceClassifier(n_classes=len(self.int_to_prov)).to(self.device)
+        if cfg.PROV_MODEL_SAVE_PATH.exists():
+            ckpt = torch.load(cfg.PROV_MODEL_SAVE_PATH, map_location=self.device)
+            state_dict = ckpt.get("model_state", ckpt.get("model", ckpt))
+            self.prov_model.load_state_dict(state_dict)
+            print(f" Loaded Province Weights from {cfg.PROV_MODEL_SAVE_PATH.name}")
+        self.prov_model.eval()
+
+    def predict_ocr(self, img_path):
+        if not Path(img_path).exists(): return None
+        try:
+            img = Image.open(img_path).convert("RGB")
+            t_img = self.tf_ocr(img).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                output = self.ocr_model(t_img)
+                return best_path_decode(output.softmax(-1), self.int_to_char)[0]
+        except: return None
+
+    def predict_province(self, img_path):
+        if not Path(img_path).exists(): return None
+        try:
+            img = Image.open(img_path).convert("RGB")
+            t_img = self.tf_prov(img).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                output = self.prov_model(t_img)
+                idx = output.argmax(1).item()
+                return self.int_to_prov.get(str(idx), self.int_to_prov.get(idx, ""))
+        except: return None
+
+    def run(self, csv_path, crops_dir):
+        print(f"\nEvaluating: {csv_path}")
+        df = pd.read_csv(csv_path).fillna("")
+        results, missing_count = [], 0
+        
+        for row in tqdm(df.itertuples(index=False), total=len(df), desc="Testing"):
+            p_plate = self.predict_ocr(Path(crops_dir) / row.image)
+            p_prov = self.predict_province(Path(crops_dir) / row.image.replace("/plates/", "/provs/").replace("_plate", "_prov"))
             
-            # Predict Province
-            pred_prov = "Unknown"
-            if prov_full_path.exists():
-                try:
-                    img = Image.open(prov_full_path).convert("RGB")
-                    t_img = tf_prov(img).unsqueeze(0).to(cfg.DEVICE)
-                    output = prov_model(t_img)
-                    idx = output.argmax(1).item()
-                    pred_prov = int_to_char_prov.get(idx, "Unknown")
-                except Exception as e:
-                    pass
- 
-            # Metrics
-            cer = editdistance.eval(pred_plate, gt_plate) / max(1, len(gt_plate))
-            prov_acc = 1 if pred_prov == gt_prov else 0
+            if p_plate is None or p_prov is None:
+                missing_count += 1
+            
+            # Simple fallback to empty string for both
+            res_plate, res_prov = p_plate or "", p_prov or ""
+            gt_plate, gt_prov = str(row.gt_plate).strip(), str(row.gt_province).strip()
             
             results.append({
-                "image": ocr_rel_path,
-                "gt_plate": gt_plate, "pred_plate": pred_plate, "cer": cer,
-                "gt_prov": gt_prov, "pred_prov": pred_prov, "prov_acc": prov_acc
+                "image": row.image,
+                "gt_plate": gt_plate, "pred_plate": res_plate,
+                "gt_prov": gt_prov, "pred_prov": res_prov,
+                "cer": editdistance.eval(res_plate, gt_plate) / max(1, len(gt_plate)),
+                "prov_acc": 1 if res_prov == gt_prov else 0
             })
-
-    # 5. Summary
-    if results:
-        df_res = pd.DataFrame(results)
-        print("\n" + "="*30)
-        print(f"FINAL TEST RESULTS")
-        print(f"OCR Avg CER:      {df_res['cer'].mean():.4f}")
-        print(f"Prov Accuracy:    {df_res['prov_acc'].mean()*100:.2f}%")
-        print("="*30)
-        out_csv = cfg.PROJECT_ROOT / "test_evaluation_results.csv"
-        df_res.to_csv(out_csv, index=False, encoding="utf-8-sig")
-        print(f"Details: {out_csv}")
+        
+        res_df = pd.DataFrame(results)
+        print(f"\nResults: Samples={len(res_df)}, Missing={missing_count}")
+        print(f"OCR CER: {res_df['cer'].mean():.4f}, Prov Acc: {res_df['prov_acc'].mean()*100:.2f}%")
+        return res_df
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="LPR Evaluation Script")
+    parser.add_argument("--csv", type=str, default=str(cfg.TEST_CSV), help="Path to test CSV")
+    parser.add_argument("--crops", type=str, default=str(cfg.CROPS_DIR), help="Path to crops directory")
+    parser.add_argument("--output", type=str, default="test_results.csv", help="Output results filename")
+    args = parser.parse_args()
+
+    # 1. Initialize Evaluator
+    evaluator = LPREvaluator()
+
+    # 2. Run Evaluation using paths from Args (defaulting to Config)
+    results_df = evaluator.run(args.csv, args.crops)
+
+    # 3. Save Results
+    output_path = cfg.PROJECT_ROOT / args.output
+    results_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"Full details saved to: {output_path}")
