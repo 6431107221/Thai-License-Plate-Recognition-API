@@ -1,19 +1,27 @@
-gcloud config set project [PROJECT_ID]
+gcloud projects create simai-lpr-ocr-project
 
-gcloud artifacts repositories create [REPO_NAME] `
+gcloud config set project simai-lpr-ocr-project
+
+gcloud services enable artifactregistry.googleapis.com
+
+gcloud services enable run.googleapis.com
+
+gcloud artifacts repositories create lpr-repo `
     --repository-format=docker `
     --location=asia-southeast1 `
-    --description="Docker repository for LPR API"
+    --project=simai-lpr-ocr-project
 
 gcloud auth configure-docker asia-southeast1-docker.pkg.dev
 
 docker build -t asia-southeast1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[IMAGE_NAME] .
 
-docker push asia-southeast1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[IMAGE_NAME]
+# ปลี่ยนชื่อ tag image doker ให้ตรงกับ GCP (กรณี build ผิดชื่อ)
+docker tag asia-southeast1-docker.pkg.dev/simai-ocr-api-dev/lpr-repo/thai-lpr-api asia-southeast1-docker.pkg.dev/simai-lpr-ocr-project/lpr-repo/thai-lpr-api
 
+docker push asia-southeast1-docker.pkg.dev/simai-lpr-ocr-project/lpr-repo/thai-lpr-api
 
-gcloud run deploy [IMAGE_NAME] `
-  --image asia-southeast1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[IMAGE_NAME] `
+gcloud run deploy thai-lpr-api `
+  --image asia-southeast1-docker.pkg.dev/simai-lpr-ocr-project/lpr-repo/thai-lpr-api `
   --region asia-southeast1 `
   --platform managed `
   --allow-unauthenticated `
