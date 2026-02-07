@@ -14,27 +14,10 @@ A high-performance microservice for Thai license plate detection and recognition
 - Backend: FastAPI, Uvicorn.
 - Infrastructure: Docker, GCP Cloud Run.
 
-## Architecture
-1. Detection: Locate the license plate in the image.
-![val_batch2_pred](https://github.com/user-attachments/assets/74c61b4c-eb9b-498e-bde5-82208c755cb5)
-
-2. Segmentation: Separate the plate number and province area.
-![val_batch1_pred](https://github.com/user-attachments/assets/25f84e37-ec9d-4b36-9509-ac83e88542de)
-
-3. Recognition: OCR for characters and Classification for province.
-
-![WorKflow-LPR](https://github.com/user-attachments/assets/8cdd4102-4634-4643-9d15-3ad4c0c2c7a0)
-
-
-## Quick Start
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Run the API:
-   ```bash
-   uvicorn src.api_server:app --reload
-   ```
+## Result Screenshot
+| Detection | Segmentation | Recognition |
+|:---------:|:---------:|:------------------:|
+| ![val_batch2_pred](https://github.com/user-attachments/assets/74c61b4c-eb9b-498e-bde5-82208c755cb5) | ![val_batch1_pred](https://github.com/user-attachments/assets/25f84e37-ec9d-4b36-9509-ac83e88542de) | ![WorKflow-LPR](https://github.com/user-attachments/assets/8cdd4102-4634-4643-9d15-3ad4c0c2c7a0) |
 
 ## Docker & GCP Deployment
 ```bash
@@ -47,5 +30,13 @@ gcloud auth configure-docker asia-southeast1-docker.pkg.dev
 docker build -t asia-southeast1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[IMAGE_NAME] .
 docker tag [OLD_TAG] [NEW_TAG]
 docker push [TAG]
-gcloud run deploy [IMAGE_NAME] [CONFIG_SERVER]
+gcloud run deploy [IMAGE_NAME]
+  --image [image] `
+  --region asia-southeast1 `
+  --platform managed `
+  --allow-unauthenticated `
+  --memory 2Gi `
+  --max-instances 1 `
+  --min-instances 0 `
+  --cpu-throttling
 ```
