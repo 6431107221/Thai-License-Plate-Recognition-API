@@ -40,16 +40,17 @@ def preprocess_raw_api_image(image_bytes):
 def get_ocr_transforms(is_train=False):
     if is_train:
         return transforms.Compose([
-            SmartResize((128, 64), mode="L"),
+            SmartResize((256, 64), mode="L"),
             transforms.RandomApply([
                 transforms.ColorJitter(brightness=0.5, contrast=0.5)
             ], p=0.4),
-            transforms.RandomAffine(degrees=3, translate=(0.02, 0.05)),
+            transforms.RandomAffine(degrees=15, translate=(0.08, 0.08), scale=(0.9, 1.1), shear=8),
+            transforms.RandomPerspective(distortion_scale=0.2, p=0.4),
             transforms.ToTensor(), # 0-1
         ])
     else:
         return transforms.Compose([
-            SmartResize((128, 64), mode="L"),
+            SmartResize((256, 64), mode="L"),
             transforms.ToTensor(),
         ])
 

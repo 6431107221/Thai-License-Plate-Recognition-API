@@ -30,7 +30,7 @@ class Config:
     # --- Hyperparameters ---
     EPOCHS = 100
     EARLY_STOPPING_PATIENCE = 20
-    LEARNING_RATE = 1e-6
+    LEARNING_RATE = 1e-4
     WEIGHT_DECAY = 1e-4
     BATCH_SIZE_OCR = 32
     BATCH_SIZE_PROV = 32

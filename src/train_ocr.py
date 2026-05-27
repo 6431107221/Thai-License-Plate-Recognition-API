@@ -109,11 +109,6 @@ class ProvinceTrainer:
         for ep in range(self.start_epoch, cfg.EPOCHS):
             self.model.train()
 
-            
-            # Freeze BN for stability on small batches
-            for m in self.model.modules():
-                if isinstance(m, nn.BatchNorm2d): m.eval()
-            
             loss_sum = 0
             correct = 0
             total = 0
@@ -195,25 +190,6 @@ class OCRTrainer:
         self._setup_model()
         self._setup_weight()
 
-# ... (omitted) ...
-
-        avg_cer = cer_sum / max(1, tot)
-        fmt_acc = valid_format_count / max(1, tot)
-        
-        print(f"       [Val] Format Valid Rate: {fmt_acc:.2%} ({valid_format_count}/{tot})")
-        
-        return avg_cer, fmt_acc
-
-    def save_checkpoint(self, epoch, cer, fmt_acc):
-        torch.save({
-            "model_state_dict": self.model.state_dict(),
-            "int_to_char": self.int_to_char,
-            "epoch": epoch,
-            "cer": cer,
-            "fmt_acc": fmt_acc,
-            "score": self.best_score
-        }, cfg.OCR_MODEL_SAVE_PATH)
-        print("       Model Saved!")
 
     def _prepare_data(self):
         train_df_raw = pd.read_csv(cfg.TRAIN_CSV).fillna("")
@@ -268,11 +244,6 @@ class OCRTrainer:
             self.model.train()
             total_loss = 0
             pbar = tqdm(self.train_loader, desc=f"OCR Ep {ep+1}/{cfg.EPOCHS}")
-            
-            # Freeze BN for stability on small batches
-            for m in self.model.modules():
-                if isinstance(m, nn.BatchNorm2d): m.eval()
-            
             for batch in pbar:
                 imgs, tg, tg_lens, _, _, _ = batch
                 imgs, tg, tg_lens = imgs.to(self.device), tg.to(self.device), tg_lens.to(self.device)
@@ -359,14 +330,16 @@ class OCRTrainer:
         
         print(f"       [Val] Format Valid Rate: {fmt_acc:.2%} ({valid_format_count}/{tot})")
         
-        return avg_cer
+        return avg_cer, fmt_acc
 
-    def save_checkpoint(self, epoch, cer):
+    def save_checkpoint(self, epoch, cer, fmt_acc):
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "int_to_char": self.int_to_char,
             "epoch": epoch,
-            "cer": cer
+            "cer": cer,
+            "fmt_acc": fmt_acc,
+            "score": self.best_score
         }, cfg.OCR_MODEL_SAVE_PATH)
         print("       Model Saved!")
 
