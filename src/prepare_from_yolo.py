@@ -1,14 +1,16 @@
 
+import argparse
+from pathlib import Path
 import cv2
 import pandas as pd
-from pathlib import Path
 from tqdm import tqdm
 
-# --- Config ---
+from src.prepare_perspective_dataset import run_pipeline
+
+# --- Config & Defaults ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# Input:
-YOLO_SEG_ROOT = PROJECT_ROOT / "yolo_datasets" / "segmentation"
-# Output
+DEFAULT_YOLO_DIR = PROJECT_ROOT / "datasets" / "LPR 2 - Polygon.yolov11"
+LEGACY_YOLO_DIR = PROJECT_ROOT / "yolo_datasets" / "segmentation"
 OUTPUT_ROOT = PROJECT_ROOT / "crops_all"
 
 CLASS_PLATE = 0    
@@ -37,12 +39,12 @@ def yolo_to_bbox(line, img_w, img_h):
         y2 = int((y_c + h/2) * img_h)
         return class_id, [max(0, x1), max(0, y1), min(img_w, x2), min(img_h, y2)]
 
-def process_split(split_name):
-    img_dir = YOLO_SEG_ROOT / split_name / "images"
-    lbl_dir = YOLO_SEG_ROOT / split_name / "labels"
+def process_split_legacy(split_name, yolo_root=LEGACY_YOLO_DIR, output_root=OUTPUT_ROOT):
+    img_dir = yolo_root / split_name / "images"
+    lbl_dir = yolo_root / split_name / "labels"
     
-    out_plate_dir = OUTPUT_ROOT / split_name / "plates"
-    out_prov_dir = OUTPUT_ROOT / split_name / "provs"
+    out_plate_dir = output_root / split_name / "plates"
+    out_prov_dir = output_root / split_name / "provs"
     out_plate_dir.mkdir(parents=True, exist_ok=True)
     out_prov_dir.mkdir(parents=True, exist_ok=True)
 
@@ -106,17 +108,51 @@ def process_split(split_name):
     return records
 
 def main():
-    for split in ["train", "valid", "test"]:
-        if (YOLO_SEG_ROOT / split).exists():
-            records = process_split(split)
-            
-            if records:
-                df = pd.DataFrame(records)
-                csv_filename = f"{split}_unified.csv"
-                
-                out_csv_path = OUTPUT_ROOT / split / csv_filename
-                df.to_csv(out_csv_path, index=False, encoding='utf-8-sig')
-                print(f"   Saved CSV Template: {out_csv_path} ({len(df)} rows)")
+    parser = argparse.ArgumentParser(description="Prepare dataset from YOLO segmentation / polygon annotations")
+    parser.add_argument(
+        "--dataset-dir",
+        type=str,
+        default=str(DEFAULT_YOLO_DIR if DEFAULT_YOLO_DIR.exists() else LEGACY_YOLO_DIR),
+        help="Path to YOLO polygon dataset",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=str(OUTPUT_ROOT),
+        help="Path to destination crops root directory",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["full", "rectify", "components"],
+        default="full",
+        help="Processing mode: full, rectify (front view only), or components",
+    )
+    parser.add_argument(
+        "--legacy-bbox",
+        action="store_true",
+        help="Use legacy axis-aligned square bounding box crop instead of perspective transform",
+    )
+    args = parser.parse_args()
+
+    if args.legacy_bbox:
+        dataset_path = Path(args.dataset_dir)
+        output_path = Path(args.output_dir)
+        for split in ["train", "valid", "test"]:
+            if (dataset_path / split).exists():
+                records = process_split_legacy(split, yolo_root=dataset_path, output_root=output_path)
+                if records:
+                    df = pd.DataFrame(records)
+                    out_csv_path = output_path / split / f"{split}_unified.csv"
+                    df.to_csv(out_csv_path, index=False, encoding='utf-8-sig')
+                    print(f"   Saved Legacy CSV: {out_csv_path} ({len(df)} rows)")
+    else:
+        run_pipeline(
+            dataset_dir=args.dataset_dir,
+            output_dir=args.output_dir,
+            mode=args.mode,
+        )
 
 if __name__ == "__main__":
     main()
+

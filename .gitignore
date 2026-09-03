@@ -9,11 +9,15 @@ venv/
 .env
 
 # Models & Data
+*.pt
 weights/*.pt
 weights/*.pth
 !weights/.gitkeep
 yolo_datasets/
 crops_all/
+crops_test_run/
+output/
+runs/
 yolo_train_runs/
 CarPlateDetect_DATASETs/
 
@@ -30,3 +34,5 @@ test_evaluation_results.csv
 # OS
 .DS_Store
 Thumbs.db
+
+datasets/
