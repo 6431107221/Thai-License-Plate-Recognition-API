@@ -483,10 +483,12 @@ class LPRPipelineService:
         pattern_name = ""
 
         if country_name == "Thai":
-            # 3A: Thai OCR (ResNetCRNN + CTC)
-            char_pil = Image.fromarray(cv2.cvtColor(char_crop, cv2.COLOR_BGR2RGB))
-            char_gray = char_pil.convert("L")
-            char_enhanced = ImageOps.autocontrast(char_gray, cutoff=1)
+            # 3A: Thai OCR (ResNetCRNN + CTC) with CLAHE + Unsharp Masking
+            char_gray = cv2.cvtColor(char_crop, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            clahe_gray = clahe.apply(char_gray)
+            enh_gray = cv2.addWeighted(clahe_gray, 1.4, cv2.GaussianBlur(clahe_gray, (0, 0), 2), -0.4, 0)
+            char_enhanced = Image.fromarray(enh_gray)
 
             ts_ocr = self.tf_ocr(char_enhanced).unsqueeze(0).to(self.device)
             with torch.no_grad():
