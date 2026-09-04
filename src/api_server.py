@@ -115,10 +115,11 @@ class LicensePlateService:
                 bx1, by1, bx2, by2 = c_box.xyxy[0].cpu().numpy().astype(int)
                 comp_img = plate_crop.crop((bx1, by1, bx2, by2))
                 
-                if "Plate" in cls_name: 
+                cls_lower = cls_name.lower()
+                if "plate" in cls_lower or "char" in cls_lower: 
                     ocr_crop = comp_img
                     # ocr_crop.save(DEBUG_API_DIR / f"2_ocr_target_{i}.jpg")
-                elif "Province" in cls_name: 
+                elif "prov" in cls_lower: 
                     prov_crop = comp_img
                     # prov_crop.save(DEBUG_API_DIR / f"3_prov_target_{i}.jpg")
 

@@ -333,9 +333,10 @@ def extract_plate_components(
                 if comp_img.size == 0:
                     continue
 
-                if "Plate" in cls_name or cls_name == "plate":
+                cls_lower = cls_name.lower()
+                if "plate" in cls_lower or "char" in cls_lower:
                     plate_crop = comp_img
-                elif "Province" in cls_name or cls_name == "province" or cls_name == "prov":
+                elif "prov" in cls_lower:
                     prov_crop = comp_img
         except Exception as err:
             print(f"   [Warning] Model 2 inference failed: {err}. Using proportional fallback.")
