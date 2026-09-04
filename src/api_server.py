@@ -420,19 +420,55 @@ class LPRPipelineService:
                 prov_conf = 0.50
 
         else:
-            # Lao Inverted Layout: Top 38% is Province (. ນະຄອນຫຼວງວຽງຈັນ .), Bottom 62% is Plate Characters (ກຣ 5489)
-            prov_y1, prov_y2 = int(rh * 0.04), int(rh * 0.38)
-            prov_x1, prov_x2 = int(rw * 0.08), int(rw * 0.92)
-            char_y1, char_y2 = int(rh * 0.36), int(rh * 0.96)
-            char_x1, char_x2 = int(rw * 0.04), int(rw * 0.96)
+            # Lao Inverted Layout: User's Flip-and-Detect Workflow!
+            # 1. Vertically flip plate so characters are at top and province at bottom (matching Thai Model 2 layout)
+            flipped_plate = cv2.flip(rectified_plate, 0)
+            try:
+                res2 = self.model_comp(flipped_plate, conf=conf_m2, verbose=False, device=0 if torch.cuda.is_available() else "cpu")[0]
+            except Exception:
+                res2 = self.model_comp(flipped_plate, conf=conf_m2, verbose=False)[0]
 
-            prov_crop = rectified_plate[prov_y1:prov_y2, prov_x1:prov_x2]
-            char_crop = rectified_plate[char_y1:char_y2, char_x1:char_x2]
+            if len(res2.boxes) > 0:
+                for c_box in res2.boxes:
+                    c_idx = int(c_box.cls[0])
+                    c_name = self.model_comp.names[c_idx].lower()
+                    c_conf = float(c_box.conf[0])
+                    bx1, by1, bx2, by2 = c_box.xyxy[0].cpu().numpy().astype(int)
+                    bx1, by1 = max(0, bx1), max(0, by1)
+                    bx2, by2 = min(rw, bx2), min(rh, by2)
 
-            char_box_coords = (char_x1, char_y1, char_x2, char_y2)
-            prov_box_coords = (prov_x1, prov_y1, prov_x2, prov_y2)
-            char_conf = 0.92
-            prov_conf = 0.92
+                    # Map coordinates back to upright orientation: y_orig = rh - y_flipped
+                    orig_y1 = max(0, rh - by2)
+                    orig_y2 = min(rh, rh - by1)
+                    orig_x1 = bx1
+                    orig_x2 = bx2
+
+                    comp_crop = rectified_plate[orig_y1:orig_y2, orig_x1:orig_x2]
+                    if comp_crop.size == 0:
+                        continue
+
+                    if ("plate" in c_name or "char" in c_name) and (c_conf > char_conf):
+                        char_crop = comp_crop
+                        char_box_coords = (orig_x1, orig_y1, orig_x2, orig_y2)
+                        char_conf = c_conf
+                    elif "prov" in c_name and (c_conf > prov_conf):
+                        prov_crop = comp_crop
+                        prov_box_coords = (orig_x1, orig_y1, orig_x2, orig_y2)
+                        prov_conf = c_conf
+
+            # Fallback if Model 2 missed either component on the flipped plate
+            if char_crop is None:
+                char_y1, char_y2 = int(rh * 0.36), int(rh * 0.96)
+                char_x1, char_x2 = int(rw * 0.04), int(rw * 0.96)
+                char_crop = rectified_plate[char_y1:char_y2, char_x1:char_x2]
+                char_box_coords = (char_x1, char_y1, char_x2, char_y2)
+                char_conf = 0.85
+            if prov_crop is None:
+                prov_y1, prov_y2 = int(rh * 0.04), int(rh * 0.38)
+                prov_x1, prov_x2 = int(rw * 0.08), int(rw * 0.92)
+                prov_crop = rectified_plate[prov_y1:prov_y2, prov_x1:prov_x2]
+                prov_box_coords = (prov_x1, prov_y1, prov_x2, prov_y2)
+                prov_conf = 0.85
 
         t_m2 = int((time.time() - t2_start) * 1000)
 
