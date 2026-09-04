@@ -317,6 +317,42 @@
       return;
     }
 
+    // Country Classifier (Model 1.5)
+    const badgeCountry = document.getElementById('badgeCountry');
+    const countryMeta = document.getElementById('countryMeta');
+    const layoutMeta = document.getElementById('layoutMeta');
+    const confCharProv = document.getElementById('confCharProv');
+    const labelCharBox = document.getElementById('labelCharBox');
+    const labelProvBox = document.getElementById('labelProvBox');
+
+    if (res.country && badgeCountry) {
+      const isThai = res.country === 'Thai';
+      badgeCountry.className = `badge-country ${isThai ? 'thai' : 'laos'}`;
+      badgeCountry.textContent = `${res.country_flag || ''} ${res.country.toUpperCase()}`;
+      
+      const cConf = res.country_confidence ? (res.country_confidence * 100).toFixed(1) + '%' : '99.9%';
+      if (countryMeta) {
+        countryMeta.textContent = `${res.country_flag || ''} ${res.country} (${cConf})`;
+        countryMeta.style.color = isThai ? 'var(--accent-cyan)' : '#f87171';
+      }
+      
+      if (layoutMeta) {
+        layoutMeta.textContent = isThai ? 'Standard (Top Char)' : 'Inverted (Top Prov)';
+        layoutMeta.style.color = isThai ? 'var(--accent-cyan)' : 'var(--accent-amber)';
+      }
+
+      if (labelCharBox && labelProvBox) {
+        labelCharBox.textContent = isThai ? 'plate_char (Top)' : 'plate_char (Bottom)';
+        labelProvBox.textContent = isThai ? 'province (Bottom)' : 'province (Top)';
+      }
+    }
+
+    if (confCharProv && res.confidence) {
+      const cC = (res.confidence.char_detection * 100).toFixed(1);
+      const pC = (res.confidence.prov_detection * 100).toFixed(1);
+      confCharProv.textContent = `${cC}% / ${pC}%`;
+    }
+
     // Stage 1: Model 1
     if (res.crops && res.crops.plate_rectified) {
       cropM1.src = res.crops.plate_rectified;
@@ -336,8 +372,6 @@
       cropProv.style.display = 'block';
     }
     timeM2.textContent = `${res.timing.m2_ms} ms`;
-    confChar.textContent = `${(res.confidence.char_detection * 100).toFixed(1)}%`;
-    confProv.textContent = `${(res.confidence.prov_detection * 100).toFixed(1)}%`;
 
     // Stage 3: Model 3
     timeM3.textContent = `${res.timing.m3_ms} ms`;

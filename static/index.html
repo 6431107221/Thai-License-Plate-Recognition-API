@@ -157,9 +157,12 @@
             <svg fill="currentColor" viewBox="0 0 24 24">
               <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/>
             </svg>
-            Pipeline Breakdown (Model 1 &rarr; Model 2 &rarr; Model 3)
+            Multi-Country Pipeline (Model 1 &rarr; 1.5 &rarr; 2 &rarr; 3)
           </h2>
-          <div class="pill" id="totalLatencyPill">Latency: -- ms</div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span class="badge-country thai" id="badgeCountry">🇹🇭 THAILAND</span>
+            <div class="pill" id="totalLatencyPill">Latency: -- ms</div>
+          </div>
         </div>
 
         <div class="pipeline-section">
@@ -192,7 +195,7 @@
             <!-- STAGE 1: Model 1 Rectified Car Plate -->
             <div class="stage-card">
               <div class="stage-header">
-                <span class="stage-badge badge-m1">Model 1: Car Plate</span>
+                <span class="stage-badge badge-m1">Model 1: Plate & Country</span>
                 <span class="stage-time" id="timeM1">-- ms</span>
               </div>
               <div class="stage-preview">
@@ -201,8 +204,8 @@
               </div>
               <div class="stage-footer">
                 <div class="stage-meta-row">
-                  <span>Rectification</span>
-                  <span>Polygon Warp + Deskew</span>
+                  <span>Country (Model 1.5)</span>
+                  <span id="countryMeta" style="color: var(--accent-cyan);">--</span>
                 </div>
                 <div class="stage-meta-row">
                   <span>Plate Confidence</span>
@@ -211,7 +214,7 @@
               </div>
             </div>
 
-            <!-- STAGE 2: Model 2 Component Crops (plate_char & province) -->
+            <!-- STAGE 2: Model 2 Component Crops -->
             <div class="stage-card">
               <div class="stage-header">
                 <span class="stage-badge badge-m2">Model 2: Components</span>
@@ -220,21 +223,21 @@
               <div class="stage-dual-preview">
                 <div class="dual-item">
                   <img id="cropChar" src="" alt="Character Crop" style="display: none;">
-                  <span class="dual-label">plate_char</span>
+                  <span class="dual-label" id="labelCharBox">plate_char</span>
                 </div>
                 <div class="dual-item">
                   <img id="cropProv" src="" alt="Province Crop" style="display: none;">
-                  <span class="dual-label">province</span>
+                  <span class="dual-label" id="labelProvBox">province</span>
                 </div>
               </div>
               <div class="stage-footer">
                 <div class="stage-meta-row">
-                  <span>Char BBox Conf</span>
-                  <span id="confChar">--</span>
+                  <span>Layout</span>
+                  <span id="layoutMeta" style="font-size: 10px; color: var(--accent-amber);">Standard</span>
                 </div>
                 <div class="stage-meta-row">
-                  <span>Prov BBox Conf</span>
-                  <span id="confProv">--</span>
+                  <span>Char / Prov Conf</span>
+                  <span id="confCharProv">--</span>
                 </div>
               </div>
             </div>
