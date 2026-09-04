@@ -4,14 +4,14 @@ from pathlib import Path
 class Config:
     # --- System & Paths ---
     PROJECT_ROOT = Path(__file__).parent.parent.absolute()
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
     NUM_WORKERS = 0 
     
     # Data Paths
-    CROPS_DIR = PROJECT_ROOT / "crops_all"
-    TRAIN_CSV = CROPS_DIR / "train" / "train_unified.csv"
-    VAL_CSV   = CROPS_DIR / "valid" / "val_unified.csv"
-    TEST_CSV  = CROPS_DIR / "test" / "test_unified.csv"
+    CROPS_DIR = PROJECT_ROOT / "output" / "ground_truth_crops"
+    TRAIN_CSV = CROPS_DIR / "train.csv"
+    VAL_CSV   = CROPS_DIR / "val.csv"
+    TEST_CSV  = CROPS_DIR / "val.csv"
 
     # --- Model Weights ---
     WEIGHTS_DIR = PROJECT_ROOT / "weights"
@@ -19,7 +19,7 @@ class Config:
     PROV_MODEL_SAVE_PATH = WEIGHTS_DIR / "province_model.pth"
     
     # YOLO Models
-    MODEL_DETECTION_PATH = WEIGHTS_DIR / "plate_detector.pt" 
+    MODEL_DETECTION_PATH = WEIGHTS_DIR / "plate_polygon_detector.pt" 
     MODEL_OCR_PREP_PATH  = WEIGHTS_DIR / "component_detector.pt"    
 
     # Misc

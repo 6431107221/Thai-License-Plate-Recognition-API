@@ -20,16 +20,18 @@ class OCRDataset(Dataset):
         self.df = df.reset_index(drop=True)
         self.root = Path(root)
         self.char_map = char_map
-        self.int_to_char = {i:c for c,i in self.char_map.items()}
+        self.int_to_char = {i: c for c, i in self.char_map.items()}
         self.transform = transform
 
     def encode(self, text):
-        encoded = [self.char_map.get(char, 0) for char in text]
+        # Filter to valid characters and ensure non-blank tokens for CTC
+        encoded = [self.char_map[char] for char in str(text) if char in self.char_map and self.char_map[char] != 0]
         return torch.LongTensor(encoded)
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        img_path = self.root / row["image"]
+        rel_path = row.get("plate_image") or row.get("image")
+        img_path = self.root / str(rel_path)
         try:
             img = Image.open(img_path).convert("RGB")
         except:
@@ -39,7 +41,7 @@ class OCRDataset(Dataset):
             img = self.transform(img)
 
         target = self.encode(row["gt_plate"])
-        return img, target, len(target), row["gt_plate"], str(img_path), "real"
+        return img, target, len(target), str(row["gt_plate"]), str(img_path), "real"
 
     def __len__(self): return len(self.df)
 
@@ -49,13 +51,12 @@ class ProvinceDataset(Dataset):
         self.root = Path(root)
         self.transform = transform
         self.char_map = char_map
-        self.int_to_char = {i:p for p,i in self.char_map.items()}
+        self.int_to_char = {i: p for p, i in self.char_map.items()}
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        img_rel_plate = row["image"]
-        img_rel_prov = img_rel_plate.replace("/plates/", "/provs/").replace("_plate", "_prov")
-        img_path = self.root / img_rel_prov
+        rel_path = row.get("province_image") or row.get("image")
+        img_path = self.root / str(rel_path)
         
         try:
             img = Image.open(img_path).convert("RGB")
@@ -64,7 +65,7 @@ class ProvinceDataset(Dataset):
             
         if self.transform:
             img = self.transform(img)
-        prov_class_id = self.char_map.get(row["gt_province"], 0)
+        prov_class_id = self.char_map.get(str(row["gt_province"]).strip(), 0)
         return img, prov_class_id
     
     def __len__(self): return len(self.df)

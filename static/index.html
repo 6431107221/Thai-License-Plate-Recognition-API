@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thai License Plate Recognition (Thai LPR) - AI Web Dashboard</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V6h14v12zM7 10h2v5H7zm4-3h2v8h-2zm4 2h2v6h-2z"/>
+        </svg>
+      </div>
+      <div>
+        <span class="brand-title">THAI LPR SYSTEM</span>
+        <span class="brand-badge">Pipeline 3-Stage</span>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <div class="status-pills">
+        <div class="pill">
+          <span class="dot"></span>
+          <span>Engine Active</span>
+        </div>
+        <div class="pill">
+          <span style="color: var(--accent-cyan);">Models: 4/4 Loaded</span>
+        </div>
+      </div>
+
+      <!-- Debug Toggle Switch -->
+      <div class="debug-toggle-wrapper">
+        <span class="debug-label">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17C12.96 5.06 12.49 5 12 5c-.49 0-.96.06-1.41.17L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z"/>
+          </svg>
+          Debug Inspection
+        </span>
+        <label class="switch" title="Toggle debug breakdown images (Off saves resources)">
+          <input type="checkbox" id="debugToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <main class="main-container">
+
+    <!-- Mode Selector Switcher -->
+    <div class="mode-tabs">
+      <button class="tab-btn active" id="tabUpload">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+        </svg>
+        Upload Mode (Image / Batch / Video)
+      </button>
+      <button class="tab-btn" id="tabLive">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </svg>
+        Live Video / RTSP Port
+      </button>
+    </div>
+
+    <!-- Dashboard 2-Column Grid -->
+    <div class="dashboard-grid">
+
+      <!-- LEFT COLUMN: Input Control Panel -->
+      <section class="glass-card">
+        
+        <!-- Upload Mode Panel -->
+        <div id="uploadPanel">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+              </svg>
+              Upload Test Files
+            </h2>
+            <span class="pill" id="uploadCountPill">0 files</span>
+          </div>
+
+          <!-- Dropzone -->
+          <div class="dropzone" id="dropzone">
+            <div class="dropzone-icon">
+              <svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
+              </svg>
+            </div>
+            <div class="dropzone-title">Drag & drop license plate images or videos</div>
+            <div class="dropzone-subtitle">Supports single/multiple .jpg, .png, .webp or .mp4 videos</div>
+            <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display: none;">
+          </div>
+
+          <!-- Batch Thumbnails Gallery (Visible when multiple images uploaded) -->
+          <div class="batch-gallery-wrapper" id="batchGalleryWrapper" style="display: none;">
+            <div class="batch-gallery-title">Batch Test Set (Select image to view breakdown)</div>
+            <div class="batch-gallery" id="batchGallery"></div>
+          </div>
+        </div>
+
+        <!-- Live RTSP / Webcam Panel (Hidden by default) -->
+        <div id="livePanel" style="display: none;">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg fill="currentColor" viewBox="0 0 24 24">
+                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+              </svg>
+              RTSP Live Stream / Port
+            </h2>
+            <span class="pill" id="streamStatusPill">Standby</span>
+          </div>
+
+          <div class="rtsp-control-box">
+            <div class="input-group">
+              <input type="text" class="input-field" id="rtspInput" placeholder="rtsp://user:pass@ip:port/stream or 0" value="0">
+              <button class="btn-primary" id="btnConnectStream">
+                <span>Connect</span>
+              </button>
+            </div>
+
+            <div class="stream-container">
+              <div class="stream-overlay-badge">
+                <span class="live-dot"></span>
+                <span id="streamBadgeText">LIVE FEED</span>
+              </div>
+              <img id="streamViewer" class="stream-image" src="" alt="Stream Feed" style="display: none;">
+              <div class="empty-state" id="streamPlaceholder">
+                <svg width="40" height="40" fill="currentColor" viewBox="0 0 24 24" style="opacity: 0.4;">
+                  <path d="M18 10.48V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4.48l4 3.98v-11l-4 3.5z"/>
+                </svg>
+                <span>Enter RTSP stream address or camera index and click Connect</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- RIGHT COLUMN: 3-Stage Visual Pipeline Breakdown -->
+      <section class="glass-card">
+        <div class="card-header">
+          <h2 class="card-title">
+            <svg fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/>
+            </svg>
+            Pipeline Breakdown (Model 1 &rarr; Model 2 &rarr; Model 3)
+          </h2>
+          <div class="pill" id="totalLatencyPill">Latency: -- ms</div>
+        </div>
+
+        <div class="pipeline-section">
+          
+          <!-- 4-Stage Visual Cards Grid -->
+          <div class="pipeline-flow">
+            
+            <!-- STAGE 0: Raw Vehicle Input -->
+            <div class="stage-card">
+              <div class="stage-header">
+                <span class="stage-badge badge-raw">Raw Input</span>
+                <span class="stage-time" id="timeRaw">--</span>
+              </div>
+              <div class="stage-preview">
+                <img id="cropRaw" src="" alt="Raw Input Image" style="display: none;">
+                <div class="empty-state" id="cropRawPlaceholder">Waiting for file...</div>
+              </div>
+              <div class="stage-footer">
+                <div class="stage-meta-row">
+                  <span>Input Resolution</span>
+                  <span id="metaRes">--</span>
+                </div>
+                <div class="stage-meta-row">
+                  <span>Detection Status</span>
+                  <span id="metaStatus" style="color: var(--accent-green);">Ready</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STAGE 1: Model 1 Rectified Car Plate -->
+            <div class="stage-card">
+              <div class="stage-header">
+                <span class="stage-badge badge-m1">Model 1: Car Plate</span>
+                <span class="stage-time" id="timeM1">-- ms</span>
+              </div>
+              <div class="stage-preview">
+                <img id="cropM1" src="" alt="Model 1 Rectified Plate" style="display: none;">
+                <div class="empty-state" id="cropM1Placeholder">No plate crop</div>
+              </div>
+              <div class="stage-footer">
+                <div class="stage-meta-row">
+                  <span>Rectification</span>
+                  <span>Polygon Warp + Deskew</span>
+                </div>
+                <div class="stage-meta-row">
+                  <span>Plate Confidence</span>
+                  <span id="confPlate">--</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STAGE 2: Model 2 Component Crops (plate_char & province) -->
+            <div class="stage-card">
+              <div class="stage-header">
+                <span class="stage-badge badge-m2">Model 2: Components</span>
+                <span class="stage-time" id="timeM2">-- ms</span>
+              </div>
+              <div class="stage-dual-preview">
+                <div class="dual-item">
+                  <img id="cropChar" src="" alt="Character Crop" style="display: none;">
+                  <span class="dual-label">plate_char</span>
+                </div>
+                <div class="dual-item">
+                  <img id="cropProv" src="" alt="Province Crop" style="display: none;">
+                  <span class="dual-label">province</span>
+                </div>
+              </div>
+              <div class="stage-footer">
+                <div class="stage-meta-row">
+                  <span>Char BBox Conf</span>
+                  <span id="confChar">--</span>
+                </div>
+                <div class="stage-meta-row">
+                  <span>Prov BBox Conf</span>
+                  <span id="confProv">--</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STAGE 3: Model 3 Recognition Result (Text + Province) -->
+            <div class="stage-card">
+              <div class="stage-header">
+                <span class="stage-badge badge-m3">Model 3: Recognition</span>
+                <span class="stage-time" id="timeM3">-- ms</span>
+              </div>
+              
+              <div class="result-hero-box">
+                <div class="result-plate-text" id="resultPlate">--</div>
+                <div class="result-province-text" id="resultProvince">--</div>
+                <span class="result-format-badge" id="resultBadge">STANDARDIZED</span>
+              </div>
+
+              <div class="stage-footer">
+                <div class="stage-meta-row">
+                  <span>Plate Pattern</span>
+                  <span id="patternText" style="color: var(--accent-cyan);">--</span>
+                </div>
+                <div class="stage-meta-row">
+                  <span>Prov Probability</span>
+                  <span id="confProvProb">--</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- DEBUG INSPECTION DRAWER (Only rendered & expanded if debug is ON) -->
+          <div class="debug-drawer" id="debugDrawer">
+            <div class="debug-header">
+              <div class="debug-title">
+                <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17C12.96 5.06 12.49 5 12 5c-.49 0-.96.06-1.41.17L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z"/>
+                </svg>
+                Model Diagnostic Breakdowns (Debug Mode Active)
+              </div>
+              <span class="pill" style="color: var(--accent-purple); border-color: rgba(168, 85, 247, 0.4);">
+                Resource Inspection
+              </span>
+            </div>
+
+            <div class="debug-grid">
+              
+              <!-- Debug 1: Model 1 Polygon Contour Overlay -->
+              <div class="debug-card">
+                <div class="debug-card-title">
+                  <span>Model 1: Polygon & Quad Corners</span>
+                  <span style="color: var(--accent-cyan);">Contour</span>
+                </div>
+                <img id="dbgPoly" class="debug-card-img" src="" alt="Polygon Overlay">
+              </div>
+
+              <!-- Debug 2: Model 1 Raw Warp vs Deskewed -->
+              <div class="debug-card">
+                <div class="debug-card-title">
+                  <span>Model 1: Fine Deskew Result</span>
+                  <span style="color: var(--accent-cyan);">Aligned</span>
+                </div>
+                <img id="dbgDeskew" class="debug-card-img" src="" alt="Fine Deskewed Plate">
+              </div>
+
+              <!-- Debug 3: Model 2 Component Bounding Boxes -->
+              <div class="debug-card">
+                <div class="debug-card-title">
+                  <span>Model 2: Component Bounding Boxes</span>
+                  <span style="color: var(--accent-amber);">plate_char / prov</span>
+                </div>
+                <img id="dbgComp" class="debug-card-img" src="" alt="Component Boxes Overlay">
+              </div>
+
+              <!-- Debug 4: Model 3A OCR Autocontrast Preprocessing -->
+              <div class="debug-card">
+                <div class="debug-card-title">
+                  <span>Model 3A: OCR Grayscale Enhanced</span>
+                  <span style="color: var(--accent-purple);">Autocontrast</span>
+                </div>
+                <img id="dbgOcr" class="debug-card-img" src="" alt="OCR Grayscale Input">
+              </div>
+
+              <!-- Debug 5: Model 3B Province Classification Top-5 Probabilities -->
+              <div class="debug-card">
+                <div class="debug-card-title">
+                  <span>Model 3B: Top Provinces Probabilities</span>
+                  <span style="color: var(--accent-green);">Softmax</span>
+                </div>
+                <div class="prob-bars" id="dbgProvBars">
+                  <div class="empty-state">No probabilities</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+    </div>
+
+  </main>
+
+  <!-- Client-side Application Script -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
