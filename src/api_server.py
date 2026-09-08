@@ -371,6 +371,31 @@ class LPRPipelineService:
         except Exception:
             res1 = self.model_plate(img_bgr, conf=conf_m1, verbose=False)[0]
 
+        # Low-light & high-sensitivity recovery:
+        # If no plate detected at default threshold, try lower confidence (conf=0.15)
+        if len(res1.boxes) == 0:
+            try:
+                res1_sens = self.model_plate(img_bgr, conf=0.15, verbose=False)[0]
+                if len(res1_sens.boxes) > 0:
+                    res1 = res1_sens
+            except Exception:
+                pass
+
+        # If still no detection and image is dark/underexposed (mean brightness < 80),
+        # apply CLAHE luminance enhancement to bring out faint plates
+        if len(res1.boxes) == 0 and np.mean(img_bgr) < 80:
+            try:
+                lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+                l, a, b = cv2.split(lab)
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                cl = clahe.apply(l)
+                enhanced = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2BGR)
+                res1_enh = self.model_plate(enhanced, conf=0.15, verbose=False)[0]
+                if len(res1_enh.boxes) > 0:
+                    res1 = res1_enh
+            except Exception:
+                pass
+
         t_m1 = int((time.time() - t1_start) * 1000)
 
         rectified_plate = None
@@ -380,14 +405,23 @@ class LPRPipelineService:
         plate_conf = 0.0
 
         if len(res1.boxes) == 0:
-            # Fallback: Check if the uploaded image is already a direct license plate crop
+            # Fallback ONLY for genuine pre-cropped edge-to-edge license plate images
+            # Must satisfy:
+            # 1. Aspect ratio roughly plate-like (1.2 to 4.5)
+            # 2. Dimensions reasonable for an isolated plate (not an HD camera scene)
+            # 3. Model 2 actually detects plate characters or province text inside this image!
             aspect_ratio = w_orig / float(max(h_orig, 1))
-            if 1.2 <= aspect_ratio <= 4.5 and self.country_model is not None:
-                c_name, c_conf = self.classify_country(img_bgr)
-                if c_conf > 0.70:
-                    rectified_plate = cv2.resize(img_bgr, (320, 160), interpolation=cv2.INTER_CUBIC)
-                    raw_warped = rectified_plate.copy()
-                    plate_conf = round(float(c_conf), 3)
+            if 1.2 <= aspect_ratio <= 4.5 and w_orig <= 1200 and h_orig <= 600:
+                test_resized = cv2.resize(img_bgr, (320, 160), interpolation=cv2.INTER_CUBIC)
+                try:
+                    res2_check = self.model_comp(test_resized, conf=0.25, verbose=False)[0]
+                    if len(res2_check.boxes) > 0:
+                        c_name, c_conf = self.classify_country(test_resized)
+                        rectified_plate = test_resized
+                        raw_warped = rectified_plate.copy()
+                        plate_conf = round(float(c_conf), 3)
+                except Exception:
+                    pass
 
             if rectified_plate is None:
                 return {
@@ -407,19 +441,33 @@ class LPRPipelineService:
             bw = bx2 - bx1
             bh = by2 - by1
 
-            # Check if input image is already a direct license plate crop
+            # Determine if this image is ALREADY a tight license plate crop with only a partial sub-box:
+            # The detected box MUST cover almost the entire image (at least 50% width and 35% area).
+            # A small box on a car photo is NEVER an edge-to-edge plate!
+            box_w_frac = bw / float(w_orig)
+            box_area_frac = (bw * bh) / float(w_orig * h_orig)
             img_aspect = w_orig / float(max(h_orig, 1))
-            is_already_plate = 1.3 <= img_aspect <= 4.2
-            is_partial_box = (bw / float(w_orig) < 0.75) or ((bw * bh) / float(w_orig * h_orig) < 0.65)
+            is_pre_cropped_candidate = (
+                (1.3 <= img_aspect <= 4.2)
+                and (box_w_frac >= 0.50)
+                and (box_area_frac >= 0.35)
+                and (w_orig <= 1200 and h_orig <= 600)
+            )
 
-            if is_already_plate and is_partial_box and plate_conf < 0.85:
-                # The uploaded image is ALREADY a tightly cropped license plate!
-                # Model 1 only detected a sub-component (e.g. only partial digits).
-                # Do NOT discard the rest of the plate; use the full image directly.
-                rectified_plate = cv2.resize(img_bgr, (320, 160), interpolation=cv2.INTER_CUBIC)
-                raw_warped = rectified_plate.copy()
-                poly_points = None
-            else:
+            if is_pre_cropped_candidate and box_w_frac < 0.85 and plate_conf < 0.80:
+                # Potential partial detection on an already-cropped plate (e.g. only digits detected on yellow commercial plate)
+                test_full = cv2.resize(img_bgr, (320, 160), interpolation=cv2.INTER_CUBIC)
+                try:
+                    res2_full = self.model_comp(test_full, conf=0.25, verbose=False)[0]
+                    if len(res2_full.boxes) >= 2:
+                        rectified_plate = test_full
+                        raw_warped = rectified_plate.copy()
+                        poly_points = None
+                except Exception:
+                    pass
+
+            if rectified_plate is None:
+                # Standard & reliable workflow: crop the detected plate!
                 if res1.masks is not None and len(res1.masks) > best_idx:
                     poly = res1.masks.xy[best_idx].astype(np.float32)
                     if len(poly) >= 3:
@@ -432,7 +480,8 @@ class LPRPipelineService:
                             )
                             rectified_plate = fine_deskew_plate(raw_warped)
 
-                if rectified_plate is None:
+                # Fallback to bounding box crop if polygon/warp failed or produced invalid crop
+                if rectified_plate is None or rectified_plate.size == 0 or rectified_plate.shape[0] < 10 or rectified_plate.shape[1] < 10:
                     raw_box = img_bgr[by1:by2, bx1:bx2]
                     if raw_box.size > 0:
                         rectified_plate = cv2.resize(raw_box, (320, 160), interpolation=cv2.INTER_CUBIC)
