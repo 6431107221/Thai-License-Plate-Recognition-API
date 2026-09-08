@@ -68,7 +68,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import cfg
-from src.models import ResNetCRNN, ProvinceClassifier, best_path_decode
+from src.models import ResNetCRNN, ProvinceClassifier, ResNetProvinceClassifier, best_path_decode
 from src.preprocess import get_ocr_transforms, get_prov_transforms
 from src.validators import (
     format_thai_plate,
@@ -259,9 +259,15 @@ class LPRPipelineService:
             int_to_prov = json.load(f)
         int_to_prov = {int(k): v for k, v in int_to_prov.items()}
 
-        model = ProvinceClassifier(n_classes=len(int_to_prov), pretrained=False).to(self.device)
         ckpt = torch.load(model_path, map_location=self.device)
         state_dict = ckpt.get("model_state", ckpt.get("model_state_dict", ckpt))
+        backbone = ckpt.get("backbone", "mobilenet_v2")
+
+        if "resnet" in backbone:
+            model = ResNetProvinceClassifier(n_classes=len(int_to_prov), backbone=backbone, pretrained=False).to(self.device)
+        else:
+            model = ProvinceClassifier(n_classes=len(int_to_prov), pretrained=False).to(self.device)
+
         model.load_state_dict(state_dict)
         model.eval()
         return model, int_to_prov
@@ -276,13 +282,20 @@ class LPRPipelineService:
             int_to_prov = json.load(f)
         int_to_prov = {int(k): v for k, v in int_to_prov.items()}
 
-        model = models.mobilenet_v2(weights=None)
-        model.classifier = nn.Sequential(
-            nn.Dropout(0.3),
-            nn.Linear(model.last_channel, len(int_to_prov))
-        )
         ckpt = torch.load(model_path, map_location=self.device)
-        model.load_state_dict(ckpt["model_state"])
+        state_dict = ckpt.get("model_state", ckpt.get("model_state_dict", ckpt))
+        backbone = ckpt.get("backbone", "mobilenet_v2")
+
+        if "resnet" in backbone:
+            model = ResNetProvinceClassifier(n_classes=len(int_to_prov), backbone=backbone, pretrained=False).to(self.device)
+        else:
+            model = models.mobilenet_v2(weights=None)
+            model.classifier = nn.Sequential(
+                nn.Dropout(0.3),
+                nn.Linear(model.last_channel, len(int_to_prov))
+            )
+
+        model.load_state_dict(state_dict)
         model = model.to(self.device)
         model.eval()
         return model, int_to_prov
@@ -666,8 +679,12 @@ class LPRPipelineService:
             char_gray = char_pil.convert("L")
             char_enhanced = ImageOps.autocontrast(char_gray, cutoff=1)
 
-            # 3B: Lao Province (MobileNetV2, 18 classes)
-            prov_pil = Image.fromarray(cv2.cvtColor(rectified_plate, cv2.COLOR_BGR2RGB))
+            # 3B: Lao Province (Using isolated province crop from Model 2)
+            if prov_crop is not None and prov_crop.size > 0:
+                prov_pil = Image.fromarray(cv2.cvtColor(prov_crop, cv2.COLOR_BGR2RGB))
+            else:
+                prov_banner = rectified_plate[int(rh * 0.02) : int(rh * 0.38), int(rw * 0.12) : int(rw * 0.88)]
+                prov_pil = Image.fromarray(cv2.cvtColor(prov_banner, cv2.COLOR_BGR2RGB))
             ts_prov = self.tf_prov(prov_pil).unsqueeze(0).to(self.device)
 
             if self.prov_model_lao is not None and len(self.int_to_prov_lao) > 0:

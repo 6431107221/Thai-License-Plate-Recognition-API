@@ -30,7 +30,7 @@ from torchvision import transforms
 from PIL import Image
 from tqdm import tqdm
 
-from src.models import ProvinceClassifier
+from src.models import ResNetProvinceClassifier
 from src.preprocess import get_prov_transforms
 
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
@@ -142,8 +142,8 @@ def train_thai_province(epochs=20, batch_size=32, lr=2e-4):
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
 
-    # 4. Model Architecture: ProvinceClassifier (MobileNetV2 with 77 outputs)
-    model = ProvinceClassifier(n_classes=n_classes, pretrained=True)
+    # 4. Model Architecture: ResNetProvinceClassifier (ResNet34 with 77 outputs)
+    model = ResNetProvinceClassifier(n_classes=n_classes, backbone="resnet34", pretrained=True)
     model = model.to(DEVICE)
 
     # 5. Loss with class weights
@@ -207,6 +207,7 @@ def train_thai_province(epochs=20, batch_size=32, lr=2e-4):
             torch.save({
                 "model_state": model.state_dict(),
                 "class_map": prov_map,
+                "backbone": "resnet34",
                 "best_acc": best_val_top1,
                 "best_acc_top5": best_val_top5,
                 "epoch": best_epoch,

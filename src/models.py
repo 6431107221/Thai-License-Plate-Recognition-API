@@ -64,6 +64,31 @@ class ProvinceClassifier(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+
+class ResNetProvinceClassifier(nn.Module):
+    """
+    ResNet Province Classifier (ResNet18 / ResNet34).
+    AdaptiveAvgPool2d handles any input dimensions (including rectangular 256x64) seamlessly.
+    """
+    def __init__(self, n_classes, backbone="resnet18", pretrained=True):
+        super().__init__()
+        self.backbone_name = backbone
+        if backbone == "resnet34":
+            weights = models.ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
+            self.model = models.resnet34(weights=weights)
+        else:
+            weights = models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
+            self.model = models.resnet18(weights=weights)
+
+        in_features = self.model.fc.in_features
+        self.model.fc = nn.Sequential(
+            nn.Dropout(0.3),
+            nn.Linear(in_features, n_classes)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
 # --- Utilities ---
 
 def best_path_decode(log_probs, int_to_char, blank=0):

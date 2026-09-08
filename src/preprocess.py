@@ -57,8 +57,8 @@ def get_ocr_transforms(is_train=False):
 def get_prov_transforms(is_train=False):
     if is_train:
         return transforms.Compose([
-            SmartResize((224, 224), mode="RGB"),
-            transforms.RandomAffine(degrees=5, translate=(0.02, 0.05)),
+            SmartResize((256, 64), mode="RGB"),
+            transforms.RandomAffine(degrees=4, translate=(0.02, 0.04)),
             transforms.RandomApply([
                 transforms.ColorJitter(brightness=0.3, contrast=0.3)
             ], p=0.5),
@@ -68,7 +68,7 @@ def get_prov_transforms(is_train=False):
         ])
     else:
         return transforms.Compose([
-            SmartResize((224, 224), mode="RGB"),
+            SmartResize((256, 64), mode="RGB"),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], 
                                  std=[0.229, 0.224, 0.225]),
