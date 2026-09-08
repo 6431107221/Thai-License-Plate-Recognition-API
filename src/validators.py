@@ -78,12 +78,14 @@ def format_thai_plate(text: str) -> str:
         if m_grp:
             return f"{m_grp.group(1)}{sep}{m_grp.group(2)}"
 
-    # 4. Pattern: NN-NNNN (Commercial trucks with hyphen)
+    # 4. Pattern: NN-NNNN (Commercial trucks with or without hyphen)
     m = PATTERN_NN_NNNN.match(clean)
     if m:
-        m_grp = re.match(rf"^({DIGIT}{{2}})-({DIGIT}{{1,4}})$", clean)
+        m_grp = re.match(rf"^({DIGIT}{{2}})-?({DIGIT}{{1,4}})$", clean)
         if m_grp:
             return f"{m_grp.group(1)}-{m_grp.group(2)}"
+    elif re.match(r"^\d{6}$", clean):
+        return f"{clean[:2]}-{clean[2:]}"
 
     # 5. Pattern: NNNNN (Police / government all digits)
     m = PATTERN_NNNNN.match(clean)

@@ -34,12 +34,33 @@ from typing import Optional, List, Dict, Any
 
 import cv2
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models, transforms
 from ultralytics import YOLO
+
+_THAI_FONT_CACHE: Dict[int, Any] = {}
+
+def get_thai_font(size: int = 16):
+    if size in _THAI_FONT_CACHE:
+        return _THAI_FONT_CACHE[size]
+    font = None
+    for fpath in [
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Thonburi.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+    ]:
+        try:
+            font = ImageFont.truetype(fpath, size)
+            break
+        except Exception:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    _THAI_FONT_CACHE[size] = font
+    return font
 
 from fastapi import FastAPI, UploadFile, File, Form, Query, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -367,27 +388,42 @@ class LPRPipelineService:
             confidences = res1.boxes.conf.cpu().numpy()
             best_idx = int(np.argmax(confidences))
             plate_conf = float(confidences[best_idx])
+            bx1, by1, bx2, by2 = res1.boxes.xyxy[best_idx].cpu().numpy().astype(int)
+            bx1, by1 = max(0, bx1), max(0, by1)
+            bx2, by2 = min(w_orig, bx2), min(h_orig, by2)
+            bw = bx2 - bx1
+            bh = by2 - by1
 
-            if res1.masks is not None and len(res1.masks) > best_idx:
-                poly = res1.masks.xy[best_idx].astype(np.float32)
-                if len(poly) >= 3:
-                    poly_points = poly
-                    quad = extract_quad_corners(poly, img=img_bgr)
-                    if quad is not None:
-                        quad_corners = quad
-                        raw_warped = warp_perspective_plate(
-                            img_bgr, quad, target_width=320, target_height=160, padding_frac=0.08
-                        )
-                        rectified_plate = fine_deskew_plate(raw_warped)
+            # Check if input image is already a direct license plate crop
+            img_aspect = w_orig / float(max(h_orig, 1))
+            is_already_plate = 1.3 <= img_aspect <= 4.2
+            is_partial_box = (bw / float(w_orig) < 0.75) or ((bw * bh) / float(w_orig * h_orig) < 0.65)
 
-        if rectified_plate is None and len(res1.boxes) > 0:
-            x1, y1, x2, y2 = res1.boxes.xyxy[best_idx].cpu().numpy().astype(int)
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(w_orig, x2), min(h_orig, y2)
-            raw_box = img_bgr[y1:y2, x1:x2]
-            if raw_box.size > 0:
-                rectified_plate = cv2.resize(raw_box, (320, 160), interpolation=cv2.INTER_CUBIC)
+            if is_already_plate and is_partial_box and plate_conf < 0.85:
+                # The uploaded image is ALREADY a tightly cropped license plate!
+                # Model 1 only detected a sub-component (e.g. only partial digits).
+                # Do NOT discard the rest of the plate; use the full image directly.
+                rectified_plate = cv2.resize(img_bgr, (320, 160), interpolation=cv2.INTER_CUBIC)
                 raw_warped = rectified_plate.copy()
+                poly_points = None
+            else:
+                if res1.masks is not None and len(res1.masks) > best_idx:
+                    poly = res1.masks.xy[best_idx].astype(np.float32)
+                    if len(poly) >= 3:
+                        poly_points = poly
+                        quad = extract_quad_corners(poly, img=img_bgr)
+                        if quad is not None:
+                            quad_corners = quad
+                            raw_warped = warp_perspective_plate(
+                                img_bgr, quad, target_width=320, target_height=160, padding_frac=0.08
+                            )
+                            rectified_plate = fine_deskew_plate(raw_warped)
+
+                if rectified_plate is None:
+                    raw_box = img_bgr[by1:by2, bx1:bx2]
+                    if raw_box.size > 0:
+                        rectified_plate = cv2.resize(raw_box, (320, 160), interpolation=cv2.INTER_CUBIC)
+                        raw_warped = rectified_plate.copy()
 
         if rectified_plate is None or rectified_plate.size == 0:
             return {
@@ -449,8 +485,8 @@ class LPRPipelineService:
                 char_box_coords = (0, 0, rw, int(rh * 0.65))
                 char_conf = 0.50
             if prov_crop is None:
-                prov_crop = rectified_plate[int(rh * 0.60) : rh, 0:rw]
-                prov_box_coords = (0, int(rh * 0.60), rw, rh)
+                prov_crop = rectified_plate[int(rh * 0.62) : int(rh * 0.94), int(rw * 0.15) : int(rw * 0.85)]
+                prov_box_coords = (int(rw * 0.15), int(rh * 0.62), int(rw * 0.85), int(rh * 0.94))
                 prov_conf = 0.50
 
         else:
@@ -561,7 +597,23 @@ class LPRPipelineService:
                             "box": [bx1, by1, bx2, by2],
                         })
                     cv2.rectangle(char_box_overlay, (bx1, by1), (bx2, by2), (0, 255, 0), 2)
-                    cv2.putText(char_box_overlay, sym, (bx1, max(12, by1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+
+                # Render Thai and numeric characters with PIL TrueType font
+                if char_box_overlay is not None and len(char_boxes_detail) > 0:
+                    pil_overlay = Image.fromarray(cv2.cvtColor(char_box_overlay, cv2.COLOR_BGR2RGB))
+                    draw_c = ImageDraw.Draw(pil_overlay)
+                    f_size = max(13, min(20, int(char_box_overlay.shape[0] * 0.28)))
+                    t_font = get_thai_font(f_size)
+                    for item in char_boxes_detail:
+                        c_sym = item["char"]
+                        cbx1, cby1, cbx2, cby2 = item["box"]
+                        tx = max(0, cbx1)
+                        ty = max(0, cby1 - f_size - 1)
+                        if ty == 0:
+                            ty = cby1 + 1
+                        draw_c.text((tx + 1, ty + 1), c_sym, fill=(0, 0, 0), font=t_font)
+                        draw_c.text((tx, ty), c_sym, fill=(0, 255, 0), font=t_font)
+                    char_box_overlay = cv2.cvtColor(np.array(pil_overlay), cv2.COLOR_RGB2BGR)
 
                 char_box_text = "".join(chars_predicted)
 
@@ -647,11 +699,13 @@ class LPRPipelineService:
                     if len(parts) > 1:
                         code = parts[-1]
                         import re
-                        m = re.match(r"^([^\d]+)(\d+)$", code)
-                        if m:
-                            found_text = f"{m.group(1)} {m.group(2)}"
-                        else:
-                            found_text = code
+                        # Only accept if code contains Lao characters (\u0E80-\u0EFF) and digits
+                        if re.search(r"[\u0E80-\u0EFF]", code) and re.search(r"\d", code):
+                            m = re.match(r"^([^\d]+)(\d+)$", code)
+                            if m:
+                                found_text = f"{m.group(1)} {m.group(2)}"
+                            else:
+                                found_text = code
 
             formatted_plate_text = found_text if found_text else "ກຣ 5489"
             raw_plate_text = formatted_plate_text
