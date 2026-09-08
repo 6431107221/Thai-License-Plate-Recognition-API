@@ -364,18 +364,22 @@ class LPRPipelineService:
         else:
             preview_bgr = img_bgr.copy()
 
+        # Determine optimal inference resolution for Model 1:
+        # High-res frames (>= 960px) benefit from imgsz=1280 to detect distant or small plates
+        m1_imgsz = 1280 if max(h_orig, w_orig) >= 960 else 640
+
         # --- Stage 1: Model 1 Plate Polygon Detection & Rectification ---
         t1_start = time.time()
         try:
-            res1 = self.model_plate(img_bgr, conf=conf_m1, verbose=False, device=0 if torch.cuda.is_available() else "cpu")[0]
+            res1 = self.model_plate(img_bgr, imgsz=m1_imgsz, conf=conf_m1, verbose=False, device=0 if torch.cuda.is_available() else "cpu")[0]
         except Exception:
-            res1 = self.model_plate(img_bgr, conf=conf_m1, verbose=False)[0]
+            res1 = self.model_plate(img_bgr, imgsz=m1_imgsz, conf=conf_m1, verbose=False)[0]
 
         # Low-light & high-sensitivity recovery:
-        # If no plate detected at default threshold, try lower confidence (conf=0.15)
+        # If no plate detected at default threshold, try lower confidence (conf=0.15) with imgsz=1280
         if len(res1.boxes) == 0:
             try:
-                res1_sens = self.model_plate(img_bgr, conf=0.15, verbose=False)[0]
+                res1_sens = self.model_plate(img_bgr, imgsz=1280, conf=0.15, verbose=False)[0]
                 if len(res1_sens.boxes) > 0:
                     res1 = res1_sens
             except Exception:
@@ -390,7 +394,7 @@ class LPRPipelineService:
                 clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
                 cl = clahe.apply(l)
                 enhanced = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2BGR)
-                res1_enh = self.model_plate(enhanced, conf=0.15, verbose=False)[0]
+                res1_enh = self.model_plate(enhanced, imgsz=1280, conf=0.15, verbose=False)[0]
                 if len(res1_enh.boxes) > 0:
                     res1 = res1_enh
             except Exception:

@@ -64,8 +64,7 @@
   const timeM2 = document.getElementById('timeM2');
   const cropChar = document.getElementById('cropChar');
   const cropProv = document.getElementById('cropProv');
-  const confChar = document.getElementById('confChar');
-  const confProv = document.getElementById('confProv');
+  const confCharProv = document.getElementById('confCharProv');
 
   // Stage 3: Model 3
   const timeM3 = document.getElementById('timeM3');
@@ -320,20 +319,23 @@
 
     // If detection failed
     if (!res.detected) {
-      cropM1.style.display = 'none';
-      cropM1Placeholder.style.display = 'flex';
-      cropChar.style.display = 'none';
-      cropProv.style.display = 'none';
-      resultPlate.textContent = 'NO PLATE';
-      resultProvince.textContent = 'None';
-      resultBadge.textContent = 'NOT DETECTED';
-      resultBadge.style.color = 'var(--accent-red)';
-      patternText.textContent = '--';
-      confPlate.textContent = '--';
-      confChar.textContent = '--';
-      confProv.textContent = '--';
-      confProvProb.textContent = '--';
-      debugDrawer.classList.remove('active');
+      if (cropM1) cropM1.style.display = 'none';
+      if (cropM1Placeholder) cropM1Placeholder.style.display = 'flex';
+      if (cropChar) cropChar.style.display = 'none';
+      if (cropProv) cropProv.style.display = 'none';
+      if (resultPlate) resultPlate.textContent = 'NO PLATE';
+      if (resultProvince) resultProvince.textContent = 'None';
+      if (resultBadge) {
+        resultBadge.textContent = 'NOT DETECTED';
+        resultBadge.style.color = 'var(--accent-red)';
+        resultBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+        resultBadge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+      }
+      if (patternText) patternText.textContent = '--';
+      if (confPlate) confPlate.textContent = '--';
+      if (confCharProv) confCharProv.textContent = '--';
+      if (confProvProb) confProvProb.textContent = '--';
+      if (debugDrawer) debugDrawer.classList.remove('active');
       return;
     }
 
