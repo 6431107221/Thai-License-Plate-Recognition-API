@@ -21,10 +21,14 @@ class Config:
     # YOLO Models
     MODEL_DETECTION_PATH = WEIGHTS_DIR / "plate_polygon_detector.pt" 
     MODEL_OCR_PREP_PATH  = WEIGHTS_DIR / "component_detector.pt"    
+    CHAR_BOX_MODEL_PATH  = WEIGHTS_DIR / "character_box_detector.pt"
 
     # Misc
     CHAR_MAP_PATH = WEIGHTS_DIR / "int_to_char.json"
     PROV_MAP_PATH = WEIGHTS_DIR / "province_map.json"
+    PROV_ABBR_MAP_PATH = WEIGHTS_DIR / "province_abbr_map.json"
+    THAI_PROVINCE_CROPS_DIR = PROJECT_ROOT / "datasets" / "thai_province_crops"
+    THAI_CHAR_CROPS_DIR = PROJECT_ROOT / "datasets" / "thai_character_crops"
     IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
     # --- Hyperparameters ---

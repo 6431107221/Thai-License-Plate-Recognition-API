@@ -1,0 +1,310 @@
+{
+  "ACR": {
+    "province_id": 64,
+    "thai_name": "อำนาจเจริญ"
+  },
+  "ATG": {
+    "province_id": 69,
+    "thai_name": "อ่างทอง"
+  },
+  "AYA": {
+    "province_id": 30,
+    "thai_name": "พระนครศรีอยุธยา"
+  },
+  "BKK": {
+    "province_id": 1,
+    "thai_name": "กรุงเทพมหานคร"
+  },
+  "BKN": {
+    "province_id": 24,
+    "thai_name": "บึงกาฬ"
+  },
+  "BRM": {
+    "province_id": 25,
+    "thai_name": "บุรีรัมย์"
+  },
+  "CBI": {
+    "province_id": 8,
+    "thai_name": "ชลบุรี"
+  },
+  "CCO": {
+    "province_id": 7,
+    "thai_name": "ฉะเชิงเทรา"
+  },
+  "CMI": {
+    "province_id": 71,
+    "thai_name": "เชียงใหม่"
+  },
+  "CNT": {
+    "province_id": 9,
+    "thai_name": "ชัยนาท"
+  },
+  "CPM": {
+    "province_id": 10,
+    "thai_name": "ชัยภูมิ"
+  },
+  "CPN": {
+    "province_id": 11,
+    "thai_name": "ชุมพร"
+  },
+  "CRI": {
+    "province_id": 70,
+    "thai_name": "เชียงราย"
+  },
+  "CTI": {
+    "province_id": 6,
+    "thai_name": "จันทบุรี"
+  },
+  "KBI": {
+    "province_id": 0,
+    "thai_name": "กระบี่"
+  },
+  "KKN": {
+    "province_id": 5,
+    "thai_name": "ขอนแก่น"
+  },
+  "KPT": {
+    "province_id": 4,
+    "thai_name": "กำแพงเพชร"
+  },
+  "KRI": {
+    "province_id": 2,
+    "thai_name": "กาญจนบุรี"
+  },
+  "KSN": {
+    "province_id": 3,
+    "thai_name": "กาฬสินธุ์"
+  },
+  "LEI": {
+    "province_id": 74,
+    "thai_name": "เลย"
+  },
+  "LPG": {
+    "province_id": 46,
+    "thai_name": "ลำปาง"
+  },
+  "LPN": {
+    "province_id": 47,
+    "thai_name": "ลำพูน"
+  },
+  "LRI": {
+    "province_id": 45,
+    "thai_name": "ลพบุรี"
+  },
+  "MDH": {
+    "province_id": 38,
+    "thai_name": "มุกดาหาร"
+  },
+  "MKM": {
+    "province_id": 37,
+    "thai_name": "มหาสารคาม"
+  },
+  "MSN": {
+    "province_id": 76,
+    "thai_name": "แม่ฮ่องสอน"
+  },
+  "NAN": {
+    "province_id": 23,
+    "thai_name": "น่าน"
+  },
+  "NBI": {
+    "province_id": 21,
+    "thai_name": "นนทบุรี"
+  },
+  "NBP": {
+    "province_id": 63,
+    "thai_name": "หนองบัวลำภู"
+  },
+  "NKI": {
+    "province_id": 62,
+    "thai_name": "หนองคาย"
+  },
+  "NMA": {
+    "province_id": 18,
+    "thai_name": "นครราชสีมา"
+  },
+  "NPM": {
+    "province_id": 17,
+    "thai_name": "นครพนม"
+  },
+  "NPT": {
+    "province_id": 16,
+    "thai_name": "นครปฐม"
+  },
+  "NRT": {
+    "province_id": 19,
+    "thai_name": "นครศรีธรรมราช"
+  },
+  "NSN": {
+    "province_id": 20,
+    "thai_name": "นครสวรรค์"
+  },
+  "NWT": {
+    "province_id": 22,
+    "thai_name": "นราธิวาส"
+  },
+  "NYK": {
+    "province_id": 15,
+    "thai_name": "นครนายก"
+  },
+  "PBI": {
+    "province_id": 72,
+    "thai_name": "เพชรบุรี"
+  },
+  "PCT": {
+    "province_id": 34,
+    "thai_name": "พิจิตร"
+  },
+  "PKN": {
+    "province_id": 27,
+    "thai_name": "ประจวบคีรีขันธ์"
+  },
+  "PKT": {
+    "province_id": 36,
+    "thai_name": "ภูเก็ต"
+  },
+  "PLG": {
+    "province_id": 33,
+    "thai_name": "พัทลุง"
+  },
+  "PLK": {
+    "province_id": 35,
+    "thai_name": "พิษณุโลก"
+  },
+  "PNA": {
+    "province_id": 32,
+    "thai_name": "พังงา"
+  },
+  "PNB": {
+    "province_id": 73,
+    "thai_name": "เพชรบูรณ์"
+  },
+  "PRE": {
+    "province_id": 75,
+    "thai_name": "แพร่"
+  },
+  "PRI": {
+    "province_id": 28,
+    "thai_name": "ปราจีนบุรี"
+  },
+  "PTE": {
+    "province_id": 26,
+    "thai_name": "ปทุมธานี"
+  },
+  "PTN": {
+    "province_id": 29,
+    "thai_name": "ปัตตานี"
+  },
+  "PYO": {
+    "province_id": 31,
+    "thai_name": "พะเยา"
+  },
+  "RBR": {
+    "province_id": 43,
+    "thai_name": "ราชบุรี"
+  },
+  "RET": {
+    "province_id": 44,
+    "thai_name": "ร้อยเอ็ด"
+  },
+  "RNG": {
+    "province_id": 41,
+    "thai_name": "ระนอง"
+  },
+  "RYG": {
+    "province_id": 42,
+    "thai_name": "ระยอง"
+  },
+  "SBR": {
+    "province_id": 57,
+    "thai_name": "สิงห์บุรี"
+  },
+  "SKA": {
+    "province_id": 50,
+    "thai_name": "สงขลา"
+  },
+  "SKM": {
+    "province_id": 53,
+    "thai_name": "สมุทรสงคราม"
+  },
+  "SKN": {
+    "province_id": 54,
+    "thai_name": "สมุทรสาคร"
+  },
+  "SKW": {
+    "province_id": 56,
+    "thai_name": "สระแก้ว"
+  },
+  "SNI": {
+    "province_id": 59,
+    "thai_name": "สุราษฎร์ธานี"
+  },
+  "SNK": {
+    "province_id": 49,
+    "thai_name": "สกลนคร"
+  },
+  "SPB": {
+    "province_id": 58,
+    "thai_name": "สุพรรณบุรี"
+  },
+  "SPK": {
+    "province_id": 52,
+    "thai_name": "สมุทรปราการ"
+  },
+  "SRI": {
+    "province_id": 55,
+    "thai_name": "สระบุรี"
+  },
+  "SRN": {
+    "province_id": 60,
+    "thai_name": "สุรินทร์"
+  },
+  "SSK": {
+    "province_id": 48,
+    "thai_name": "ศรีสะเกษ"
+  },
+  "STI": {
+    "province_id": 61,
+    "thai_name": "สุโขทัย"
+  },
+  "STN": {
+    "province_id": 51,
+    "thai_name": "สตูล"
+  },
+  "TAK": {
+    "province_id": 14,
+    "thai_name": "ตาก"
+  },
+  "TRG": {
+    "province_id": 12,
+    "thai_name": "ตรัง"
+  },
+  "TRT": {
+    "province_id": 13,
+    "thai_name": "ตราด"
+  },
+  "UBN": {
+    "province_id": 68,
+    "thai_name": "อุบลราชธานี"
+  },
+  "UDN": {
+    "province_id": 65,
+    "thai_name": "อุดรธานี"
+  },
+  "UTI": {
+    "province_id": 67,
+    "thai_name": "อุทัยธานี"
+  },
+  "UTT": {
+    "province_id": 66,
+    "thai_name": "อุตรดิตถ์"
+  },
+  "YLA": {
+    "province_id": 39,
+    "thai_name": "ยะลา"
+  },
+  "YST": {
+    "province_id": 40,
+    "thai_name": "ยโสธร"
+  }
+}

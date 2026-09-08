@@ -140,6 +140,9 @@ class LPRPipelineService:
         prov_path = cfg.WEIGHTS_DIR / "province_model.pth"
         char_map_path = cfg.WEIGHTS_DIR / "int_to_char.json"
         prov_map_path = cfg.WEIGHTS_DIR / "province_map.json"
+        char_box_path = cfg.WEIGHTS_DIR / "character_box_detector.pt"
+        char_class_path = cfg.WEIGHTS_DIR / "character_classifier.pth"
+        char_class_map_path = cfg.WEIGHTS_DIR / "char_classifier_map.json"
 
         # Lao Models
         prov_lao_path = cfg.WEIGHTS_DIR / "province_model_lao.pth"
@@ -156,9 +159,13 @@ class LPRPipelineService:
         print(f"[Model 2] Loading component detector from: {m2_path}")
         self.model_comp = YOLO(str(m2_path))
 
-        # 4. Load Model 3A (Thai OCR Model)
+        # 4. Load Model 3A (Thai OCR Model - ResNetCRNN CTC)
         print(f"[Model 3A] Loading ResNetCRNN OCR model from: {ocr_path}")
         self.ocr_model, self.int_to_char = self._load_ocr_model(ocr_path, char_map_path)
+
+        # 4.5. Load Character Box Detector & Character Classifier (Individual Boxes)
+        self.char_box_model = YOLO(str(char_box_path)) if char_box_path.exists() else None
+        self.char_classifier, self.int_to_char_class = self._load_char_classifier(char_class_path, char_class_map_path)
 
         # 5. Load Model 3B (Thai Province Model)
         print(f"[Model 3B] Loading MobileNetV2 Thai Province model from: {prov_path}")
@@ -170,6 +177,11 @@ class LPRPipelineService:
         # 7. Transforms
         self.tf_ocr = get_ocr_transforms(is_train=False)
         self.tf_prov = get_prov_transforms(is_train=False)
+        self.tf_char = transforms.Compose([
+            transforms.Resize((64, 64)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
         self.tf_country = transforms.Compose([
             transforms.Resize((128, 256)),
             transforms.ToTensor(),
@@ -253,6 +265,28 @@ class LPRPipelineService:
         model = model.to(self.device)
         model.eval()
         return model, int_to_prov
+
+    def _load_char_classifier(self, model_path: Path, map_path: Path):
+        print(f"[Model 3A_Box] Loading Character Classifier from: {model_path}")
+        if not model_path.exists() or not map_path.exists():
+            print("   Character classifier not found.")
+            return None, {}
+
+        with open(map_path, "r", encoding="utf-8") as f:
+            int_to_char = json.load(f)
+        int_to_char = {int(k): v for k, v in int_to_char.items()}
+
+        model = models.mobilenet_v2(weights=None)
+        model.classifier = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(model.last_channel, len(int_to_char))
+        )
+        ckpt = torch.load(model_path, map_location=self.device)
+        state_dict = ckpt.get("model_state", ckpt)
+        model.load_state_dict(state_dict)
+        model = model.to(self.device)
+        model.eval()
+        return model, int_to_char
 
     def classify_country(self, rectified_bgr: np.ndarray) -> tuple[str, float]:
         """Classifies if a front-view rectified plate is from Thailand or Laos."""
@@ -482,8 +516,56 @@ class LPRPipelineService:
         is_valid = False
         pattern_name = ""
 
+        char_boxes_detail = []
+        char_box_text = ""
+        char_box_overlay = None
+
         if country_name == "Thai":
-            # 3A: Thai OCR (ResNetCRNN + CTC)
+            # 3A-1: Thai Character Box Detection & Individual Classification
+            if self.char_box_model is not None and self.char_classifier is not None and char_crop is not None:
+                box_res = self.char_box_model(char_crop, conf=0.20, verbose=False)[0]
+                detected_boxes = []
+                for b in box_res.boxes:
+                    bx1, by1, bx2, by2 = [int(v) for v in b.xyxy[0]]
+                    bconf = float(b.conf[0])
+                    detected_boxes.append((bx1, by1, bx2, by2, bconf))
+                # Sort left-to-right
+                detected_boxes.sort(key=lambda item: item[0])
+
+                char_box_overlay = char_crop.copy()
+                chars_predicted = []
+                for bx1, by1, bx2, by2, bconf in detected_boxes:
+                    single_crop = char_crop[max(0, by1) : min(char_crop.shape[0], by2), max(0, bx1) : min(char_crop.shape[1], bx2)]
+                    if single_crop.shape[0] < 4 or single_crop.shape[1] < 4:
+                        continue
+                    # Pad to square (64x64) with neutral background
+                    sh, sw = single_crop.shape[:2]
+                    smax = max(sh, sw)
+                    corners = np.array([single_crop[0, 0], single_crop[0, -1], single_crop[-1, 0], single_crop[-1, -1]])
+                    bg_col = np.median(corners, axis=0).astype(np.uint8)
+                    padded_c = np.full((smax, smax, 3), bg_col, dtype=np.uint8)
+                    padded_c[(smax - sh) // 2 : (smax - sh) // 2 + sh, (smax - sw) // 2 : (smax - sw) // 2 + sw] = single_crop
+
+                    pil_char = Image.fromarray(cv2.cvtColor(padded_c, cv2.COLOR_BGR2RGB))
+                    ts_c = self.tf_char(pil_char).unsqueeze(0).to(self.device)
+                    with torch.no_grad():
+                        out_c = self.char_classifier(ts_c)
+                        probs_c = F.softmax(out_c, dim=1).squeeze(0)
+                        top_p, top_i = torch.topk(probs_c, k=1)
+                        sym = self.int_to_char_class.get(top_i.item(), "?")
+                        char_p = float(top_p.item())
+                        chars_predicted.append(sym)
+                        char_boxes_detail.append({
+                            "char": sym,
+                            "prob": round(char_p * 100, 1),
+                            "box": [bx1, by1, bx2, by2],
+                        })
+                    cv2.rectangle(char_box_overlay, (bx1, by1), (bx2, by2), (0, 255, 0), 2)
+                    cv2.putText(char_box_overlay, sym, (bx1, max(12, by1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+
+                char_box_text = "".join(chars_predicted)
+
+            # 3A-2: Thai OCR (ResNetCRNN + CTC)
             char_pil = Image.fromarray(cv2.cvtColor(char_crop, cv2.COLOR_BGR2RGB))
             char_gray = char_pil.convert("L")
             char_enhanced = ImageOps.autocontrast(char_gray, cutoff=1)
@@ -493,7 +575,17 @@ class LPRPipelineService:
                 out_ocr = self.ocr_model(ts_ocr)
                 raw_plate_text = best_path_decode(out_ocr.softmax(-1), self.int_to_char)[0]
 
-            formatted_plate_text = format_thai_plate(raw_plate_text)
+            # Reconcile character box prediction with CTC OCR:
+            fmt_box = format_thai_plate(char_box_text)
+            fmt_ctc = format_thai_plate(raw_plate_text)
+            if is_valid_plate(fmt_box):
+                if not is_valid_plate(fmt_ctc) or len(fmt_box.replace(" ", "")) >= len(fmt_ctc.replace(" ", "")):
+                    formatted_plate_text = fmt_box
+                else:
+                    formatted_plate_text = fmt_ctc
+            else:
+                formatted_plate_text = fmt_ctc if fmt_ctc else fmt_box
+
             is_valid = is_valid_plate(formatted_plate_text)
             pattern_name = determine_pattern_name(formatted_plate_text, country="Thai")
 
@@ -602,6 +694,9 @@ class LPRPipelineService:
                 "deskewed": mat_to_base64(rectified_plate),
                 "comp_overlay": mat_to_base64(comp_overlay),
                 "char_enhanced": pil_to_base64(char_enhanced, format="JPEG"),
+                "char_boxes_overlay": mat_to_base64(char_box_overlay) if char_box_overlay is not None else "",
+                "char_boxes": char_boxes_detail,
+                "char_box_text": char_box_text,
                 "prov_top5": prov_top5,
             }
 
@@ -625,6 +720,8 @@ class LPRPipelineService:
             "country_confidence": round(country_conf, 3),
             "plate_text": formatted_plate_text,
             "raw_plate_text": raw_plate_text,
+            "char_box_text": char_box_text,
+            "char_boxes": char_boxes_detail,
             "province": top_prov_name,
             "pattern_name": pattern_name,
             "is_valid": is_valid,
@@ -678,7 +775,9 @@ def api_health():
             "model_1": "plate_polygon_detector.pt (Polygon Segmentation)",
             "model_1_5": "country_classifier.pth (Thai vs Laos Classifier)",
             "model_2": "component_detector.pt (Adaptive Layout Localization)",
-            "model_3a_thai": "ocr_model.pth (ResNetCRNN CTC)",
+            "model_3a_thai_ctc": "ocr_model.pth (ResNetCRNN CTC)",
+            "model_3a_thai_char_box": "character_box_detector.pt (Individual Char BBox)",
+            "model_3a_thai_char_classifier": "character_classifier.pth (50 Thai Classes)",
             "model_3b_thai": "province_model.pth (77 Thai Provinces)",
             "model_3b_lao": "province_model_lao.pth (18 Lao Provinces)",
         },

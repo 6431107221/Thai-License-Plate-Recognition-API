@@ -82,6 +82,9 @@
   const dbgComp = document.getElementById('dbgComp');
   const dbgOcr = document.getElementById('dbgOcr');
   const dbgProvBars = document.getElementById('dbgProvBars');
+  const dbgCharBoxes = document.getElementById('dbgCharBoxes');
+  const dbgCharBoxesTitle = document.getElementById('dbgCharBoxesTitle');
+  const cardDbgCharBoxes = document.getElementById('cardDbgCharBoxes');
 
   // --- Initialization ---
   function init() {
@@ -150,6 +153,23 @@
       if (e.target.files && e.target.files.length > 0) {
         handleSelectedFiles(e.target.files);
       }
+    });
+
+    // Sample Plates Quick Test Buttons
+    document.querySelectorAll('.btn-sample').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const url = btn.dataset.sample;
+        const name = btn.dataset.name;
+        try {
+          const resp = await fetch(url);
+          const blob = await resp.blob();
+          const file = new File([blob], name, { type: 'image/jpeg' });
+          await uploadImageFiles([file]);
+        } catch (err) {
+          console.error('Failed to load sample image:', err);
+        }
+      });
     });
   }
 
@@ -411,6 +431,17 @@
     dbgDeskew.src = d.deskewed || d.raw_warp || '';
     dbgComp.src = d.comp_overlay || '';
     dbgOcr.src = d.char_enhanced || '';
+
+    // Render Character Boxes Overlay & Text
+    if (dbgCharBoxes && d.char_boxes_overlay) {
+      dbgCharBoxes.src = d.char_boxes_overlay;
+      if (cardDbgCharBoxes) cardDbgCharBoxes.style.display = 'block';
+      if (dbgCharBoxesTitle && d.char_box_text) {
+        dbgCharBoxesTitle.textContent = `Boxes: ${d.char_box_text}`;
+      }
+    } else if (cardDbgCharBoxes) {
+      cardDbgCharBoxes.style.display = 'none';
+    }
 
     // Render Province Probabilities Bar Chart
     dbgProvBars.innerHTML = '';

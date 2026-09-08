@@ -105,6 +105,20 @@
             <input type="file" id="fileInput" multiple accept="image/*,video/*" style="display: none;">
           </div>
 
+          <!-- Sample Plates Quick Test Row -->
+          <div class="sample-plates-row" style="margin-top: 12px; display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap;">
+            <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Quick Test Samples:</span>
+            <button class="btn-sample" id="btnSample0071" type="button" data-sample="/static/samples/0071.jpg" data-name="0071.jpg" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #60a5fa; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+              Plate 0071 (ฎอ 9720)
+            </button>
+            <button class="btn-sample" id="btnSample0007" type="button" data-sample="/static/samples/0007.jpg" data-name="0007.jpg" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+              Plate 0007 (ฮร 9960)
+            </button>
+            <button class="btn-sample" id="btnSample0002" type="button" data-sample="/static/samples/0002.jpg" data-name="0002.jpg" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fbbf24; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+              Plate 0002 (82-6990)
+            </button>
+          </div>
+
           <!-- Batch Thumbnails Gallery (Visible when multiple images uploaded) -->
           <div class="batch-gallery-wrapper" id="batchGalleryWrapper" style="display: none;">
             <div class="batch-gallery-title">Batch Test Set (Select image to view breakdown)</div>
@@ -330,6 +344,15 @@
                 <div class="prob-bars" id="dbgProvBars">
                   <div class="empty-state">No probabilities</div>
                 </div>
+              </div>
+
+              <!-- Debug 6: Model 3A Character Box Detection & Per-Box Classification -->
+              <div class="debug-card" id="cardDbgCharBoxes">
+                <div class="debug-card-title">
+                  <span>Model 3A: Character Box Classifier</span>
+                  <span style="color: var(--accent-cyan);" id="dbgCharBoxesTitle">Individual BBoxes</span>
+                </div>
+                <img id="dbgCharBoxes" class="debug-card-img" src="" alt="Character Boxes Overlay">
               </div>
 
             </div>
