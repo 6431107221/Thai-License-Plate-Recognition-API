@@ -36,7 +36,7 @@ from src.preprocess import get_prov_transforms
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "datasets" / "thai_province_crops"
+DATA_DIR = (PROJECT_ROOT / "datasets" / "Thai" / "thai_province_crops") if (PROJECT_ROOT / "datasets" / "Thai" / "thai_province_crops").exists() else (PROJECT_ROOT / "datasets" / "thai_province_crops")
 PROV_MAP_PATH = PROJECT_ROOT / "weights" / "province_map.json"
 WEIGHTS_DIR = PROJECT_ROOT / "weights"
 MODEL_SAVE_PATH = WEIGHTS_DIR / "province_model.pth"

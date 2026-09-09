@@ -28,14 +28,14 @@ from tqdm import tqdm
 from PIL import Image, ImageDraw, ImageFont
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-YOLO_PROV_DIR = PROJECT_ROOT / "datasets" / "thai-car-license-plate-province.v5i.yolov11"
+YOLO_PROV_DIR = (PROJECT_ROOT / "datasets" / "Thai" / "thai-car-license-plate-province.v5i.yolov11") if (PROJECT_ROOT / "datasets" / "Thai" / "thai-car-license-plate-province.v5i.yolov11").exists() else (PROJECT_ROOT / "datasets" / "thai-car-license-plate-province.v5i.yolov11")
 GT_PROV_CSV = PROJECT_ROOT / "output" / "ground_truth_crops" / "gt_province.csv"
 GT_PROV_DIR = PROJECT_ROOT / "output" / "ground_truth_crops"
 
 ABBR_MAP_PATH = PROJECT_ROOT / "weights" / "province_abbr_map.json"
 PROV_MAP_PATH = PROJECT_ROOT / "weights" / "province_map.json"
 
-OUTPUT_DIR = PROJECT_ROOT / "datasets" / "thai_province_crops"
+OUTPUT_DIR = PROJECT_ROOT / "datasets" / "Thai" / "thai_province_crops"
 
 
 def load_mappings():
@@ -283,11 +283,15 @@ def balance_minority_provinces(prov_map, target_min=100):
         class_folder.mkdir(parents=True, exist_ok=True)
 
         existing_imgs = list(class_folder.glob("*.jpg"))
-        # If train has no crops for this province, try valid or test splits
+        # If train has no crops for this province, copy seed crops from valid or test splits
         if not existing_imgs:
             alt_imgs = list((OUTPUT_DIR / "valid" / folder_name).glob("*.jpg")) + list((OUTPUT_DIR / "test" / folder_name).glob("*.jpg"))
             if alt_imgs:
-                existing_imgs = alt_imgs
+                for a_p in alt_imgs:
+                    dest_p = class_folder / a_p.name
+                    if not dest_p.exists():
+                        shutil.copy2(a_p, dest_p)
+                existing_imgs = list(class_folder.glob("*.jpg"))
 
         n_exist = len(existing_imgs)
 
