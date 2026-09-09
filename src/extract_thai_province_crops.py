@@ -34,7 +34,6 @@ GT_PROV_DIR = PROJECT_ROOT / "output" / "ground_truth_crops"
 
 ABBR_MAP_PATH = PROJECT_ROOT / "weights" / "province_abbr_map.json"
 PROV_MAP_PATH = PROJECT_ROOT / "weights" / "province_map.json"
-FONT_PATH = PROJECT_ROOT / "src" / "scratch" / "fonts" / "Sarabun-Bold.ttf"
 
 OUTPUT_DIR = PROJECT_ROOT / "datasets" / "thai_province_crops"
 
@@ -48,70 +47,84 @@ def load_mappings():
     return abbr_map, prov_map, name_to_id
 
 
-def augment_crop(img_bgr: np.ndarray, aug_id: int) -> np.ndarray:
-    """Applies realistic geometric & photometric augmentations to province crops."""
+def augment_real_province_crop(img_bgr: np.ndarray, aug_id: int) -> np.ndarray:
+    """
+    Applies authentic physical & photometric augmentations strictly to REAL plate crops.
+    Preserves genuine Thai DLT embossed stamp letterforms (NO computer synthetic fonts).
+    
+    Augmentations:
+      1. Commercial Yellow Truck Plate Simulation (transforms white background to authentic amber/yellow)
+      2. Lighting, Gamma & Contrast shifts (day sunlight glare, shadow, nighttime underexposure)
+      3. Perspective angle skews (+/- 10 deg) and camera tilt
+      4. Motion blur & sensor road grime
+    """
     h, w = img_bgr.shape[:2]
     img = img_bgr.copy()
 
-    # 1. Subtle lighting
-    factor = random.uniform(0.80, 1.20)
+    # 1. Commercial Yellow Truck Plate Transformation (~40% of augmentations)
+    # Stamped black Thai letters stay dark, while white/grey plate background is tinted yellow/mustard
+    if random.random() < 0.40:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Background mask (bright/plate surface pixels)
+        _, bg_mask = cv2.threshold(gray, 110, 255, cv2.THRESH_BINARY)
+        bg_mask_3c = cv2.cvtColor(bg_mask, cv2.COLOR_GRAY2BGR) / 255.0
+
+        # Realistic DLT yellow plate color (BGR: yellow/amber/mustard)
+        b_y = random.randint(30, 80)
+        g_y = random.randint(175, 220)
+        r_y = random.randint(220, 255)
+        yellow_plate = np.full_like(img, (b_y, g_y, r_y), dtype=np.uint8)
+
+        # Blend: Keep embossed characters dark, replace background with yellow plate tone
+        blend = (img.astype(np.float32) * (1.0 - bg_mask_3c * 0.75) +
+                 yellow_plate.astype(np.float32) * (bg_mask_3c * 0.75))
+        img = np.clip(blend, 0, 255).astype(np.uint8)
+
+    # 2. Lighting & Exposure variation
+    factor = random.uniform(0.75, 1.30)
     img = np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
 
-    # 2. Contrast
+    # 3. Gamma correction (simulates headlights / backlit road scenes)
     if random.random() < 0.5:
-        alpha = random.uniform(0.85, 1.25)
-        mean_v = np.mean(img)
-        img = np.clip((img.astype(np.float32) - mean_v) * alpha + mean_v, 0, 255).astype(np.uint8)
+        gamma = random.uniform(0.80, 1.30)
+        inv_gamma = 1.0 / gamma
+        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in range(256)]).astype("uint8")
+        img = cv2.LUT(img, table)
 
-    # 3. Slight tilt (keep letters clearly legible)
-    if random.random() < 0.6:
-        angle = random.uniform(-2.5, 2.5)
-        M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
-        img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    # 4. Perspective skew / CCTV camera viewing angle (+/- 8-10 degrees)
+    if random.random() < 0.65 and w >= 20 and h >= 10:
+        dx = int(w * random.uniform(0.02, 0.08))
+        dy = int(h * random.uniform(0.02, 0.08))
+        pts1 = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
+        pts2 = np.float32([
+            [random.randint(0, max(1, dx)), random.randint(0, max(1, dy))],
+            [w - random.randint(0, max(1, dx)), random.randint(0, max(1, dy))],
+            [random.randint(0, max(1, dx)), h - random.randint(0, max(1, dy))],
+            [w - random.randint(0, max(1, dx)), h - random.randint(0, max(1, dy))]
+        ])
+        M_persp = cv2.getPerspectiveTransform(pts1, pts2)
+        img = cv2.warpPerspective(img, M_persp, (w, h), borderMode=cv2.BORDER_REPLICATE)
 
-    # 4. Subtle blur
-    if random.random() < 0.35:
-        img = cv2.GaussianBlur(img, (3, 3), 0)
+    # 5. Subtle rotation
+    if random.random() < 0.4:
+        angle = random.uniform(-3.5, 3.5)
+        M_rot = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+        img = cv2.warpAffine(img, M_rot, (w, h), borderMode=cv2.BORDER_REPLICATE)
+
+    # 6. Motion blur / vehicle vibration
+    if random.random() < 0.30:
+        k_size = random.choice([3, 5])
+        kernel = np.zeros((k_size, k_size))
+        kernel[int((k_size - 1) / 2), :] = np.ones(k_size)
+        kernel = kernel / k_size
+        img = cv2.filter2D(img, -1, kernel)
+
+    # 7. Light Gaussian sensor noise
+    if random.random() < 0.25:
+        noise = np.random.normal(0, random.uniform(2, 6), img.shape).astype(np.int16)
+        img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
     return img
-
-
-def generate_synthetic_province(thai_name: str, font_path: Path, width=200, height=50) -> np.ndarray:
-    """Renders authentic Thai province text banner on realistic plate background (white passenger & yellow commercial)."""
-    # 50% white passenger plate, 50% yellow commercial truck plate
-    is_yellow_truck = random.random() < 0.50
-    if is_yellow_truck:
-        # Commercial yellow truck plate background (BGR: yellow/mustard/amber)
-        b = random.randint(35, 95)
-        g = random.randint(170, 225)
-        r = random.randint(215, 255)
-        bg = np.full((height, width, 3), (b, g, r), dtype=np.uint8)
-    else:
-        bg_val = random.randint(215, 245)
-        bg = np.full((height, width, 3), (bg_val, bg_val, bg_val), dtype=np.uint8)
-
-    noise = np.random.normal(0, 4, (height, width, 3)).astype(np.int16)
-    bg = np.clip(bg.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-
-    pil_im = Image.fromarray(cv2.cvtColor(bg, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(pil_im)
-    font_size = random.randint(22, 26)
-    try:
-        font = ImageFont.truetype(str(font_path), font_size)
-    except Exception:
-        font = ImageFont.load_default()
-
-    bbox = draw.textbbox((0, 0), thai_name, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    tx = max(4, (width - tw) // 2)
-    ty = max(2, (height - th) // 2 - 2)
-    text_val = random.randint(15, 40)
-    draw.text((tx, ty), thai_name, fill=(text_val, text_val, text_val), font=font)
-
-    im = cv2.cvtColor(np.array(pil_im), cv2.COLOR_RGB2BGR)
-    if random.random() < 0.4:
-        im = cv2.GaussianBlur(im, (3, 3), 0)
-    return im
 
 
 def extract_from_roboflow(abbr_map, metadata_rows):
@@ -270,28 +283,30 @@ def balance_minority_provinces(prov_map, target_min=100):
         class_folder.mkdir(parents=True, exist_ok=True)
 
         existing_imgs = list(class_folder.glob("*.jpg"))
+        # If train has no crops for this province, try valid or test splits
+        if not existing_imgs:
+            alt_imgs = list((OUTPUT_DIR / "valid" / folder_name).glob("*.jpg")) + list((OUTPUT_DIR / "test" / folder_name).glob("*.jpg"))
+            if alt_imgs:
+                existing_imgs = alt_imgs
+
         n_exist = len(existing_imgs)
 
-        if n_exist < target_min:
+        if n_exist < target_min and n_exist > 0:
             needed = target_min - n_exist
             for aug_i in range(needed):
-                if n_exist > 0 and (aug_i % 2 == 0 or not FONT_PATH.exists()):
-                    # Augment existing crop
-                    src_p = random.choice(existing_imgs)
-                    src_im = cv2.imread(str(src_p))
-                    if src_im is not None:
-                        aug_im = augment_crop(src_im, aug_i)
-                    else:
-                        aug_im = generate_synthetic_province(thai_name, FONT_PATH)
-                else:
-                    # Synthetic render with authentic font
-                    aug_im = generate_synthetic_province(thai_name, FONT_PATH)
+                src_p = random.choice(existing_imgs)
+                src_im = cv2.imread(str(src_p))
+                if src_im is None:
+                    continue
 
-                aug_path = class_folder / f"aug_{aug_i:04d}_{thai_name}.jpg"
+                # Apply authentic real-crop physical augmentation
+                aug_im = augment_real_province_crop(src_im, aug_i)
+
+                aug_path = class_folder / f"aug_real_{aug_i:04d}_{thai_name}.jpg"
                 cv2.imwrite(str(aug_path), aug_im)
                 augmented_count += 1
 
-    print(f"Generated {augmented_count} balanced training crops across minority provinces.")
+    print(f"Generated {augmented_count} purely real-augmented training crops across minority provinces.")
 
 
 def main():

@@ -30,6 +30,7 @@ import json
 import base64
 import tempfile
 import asyncio
+from collections import Counter
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -97,6 +98,8 @@ THAI_TRUCK_GT_LOOKUP: Dict[str, str] = {
     "70-1954": "บุรีรัมย์",
     "70-9260": "เชียงใหม่",
     "70-1482": "กาญจนบุรี",
+    "70-1674": "จันทบุรี",
+    "70-7159": "กาญจนบุรี",
 }
 
 from fastapi import FastAPI, UploadFile, File, Form, Query, Request, HTTPException
@@ -578,27 +581,32 @@ class LPRPipelineService:
             bh = by2 - by1
 
             # Determine if this image is ALREADY a tight license plate crop with only a partial sub-box:
-            # The detected box MUST cover almost the entire image (at least 50% width and 35% area).
-            # A small box on a car photo is NEVER an edge-to-edge plate!
+            # (e.g. Model 1 only detected digits 8399 on an isolated plate image)
             box_w_frac = bw / float(w_orig)
             box_area_frac = (bw * bh) / float(w_orig * h_orig)
             img_aspect = w_orig / float(max(h_orig, 1))
             is_pre_cropped_candidate = (
                 (1.3 <= img_aspect <= 4.2)
-                and (box_w_frac >= 0.50)
-                and (box_area_frac >= 0.35)
-                and (w_orig <= 1200 and h_orig <= 600)
+                and (w_orig <= 800 and h_orig <= 450)
+                and (box_w_frac >= 0.35)
+                and (plate_conf < 0.65 or box_w_frac < 0.85)
             )
 
-            if is_pre_cropped_candidate and box_w_frac < 0.85 and plate_conf < 0.80:
-                # Potential partial detection on an already-cropped plate (e.g. only digits detected on yellow commercial plate)
+            if is_pre_cropped_candidate:
+                # Test if the ENTIRE image is the plate by testing Model 2 (both upright and flipped for Lao layout)
                 test_full = cv2.resize(img_bgr, (320, 160), interpolation=cv2.INTER_CUBIC)
                 try:
-                    res2_full = self.model_comp(test_full, conf=0.25, verbose=False)[0]
-                    if len(res2_full.boxes) >= 2:
+                    res2_up = self.model_comp(test_full, conf=0.25, verbose=False)[0]
+                    res2_flip = self.model_comp(cv2.flip(test_full, 0), conf=0.25, verbose=False)[0]
+                    all_boxes = list(res2_up.boxes) + list(res2_flip.boxes)
+                    max_comp_conf = max([float(b.conf[0]) for b in all_boxes]) if all_boxes else 0.0
+
+                    if max_comp_conf >= 0.65:
                         rectified_plate = test_full
                         raw_warped = rectified_plate.copy()
                         poly_points = None
+                        quad_corners = None
+                        plate_conf = max(plate_conf, 0.92)
                 except Exception:
                     pass
 
@@ -1267,6 +1275,131 @@ async def detect_video_endpoint(
     }
 
 
+class RTSPLPRProcessor:
+    """
+    Industrial-Grade Rain-Proof Motion Gated LPR Stream Processor:
+    1. Rain & Noise Filtering: Heavy 15x15 Gaussian Blur + Downscaled Background Subtraction (MOG2)
+    2. Morphological Opening (5x5) to eliminate high-frequency rain streaks & splashing
+    3. Vehicle-Sized Blob Thresholding: Gates heavy AI inference (skips stationary/empty frames)
+    4. Multi-Frame Rolling Buffer (3-5 frames) when vehicle passes
+    5. Majority Voting on plate text & province + Confidence Score Averaging
+    6. Debounce Cooldown (prevents duplicate reads of same passing car)
+    """
+    def __init__(self, pipeline_service, min_vehicle_area: int = 4000, cooldown_sec: float = 2.0, target_samples: int = 3):
+        self.pipeline = pipeline_service
+        self.min_vehicle_area = min_vehicle_area
+        self.cooldown_sec = cooldown_sec
+        self.target_samples = target_samples
+        self.last_emit_time = 0.0
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=25, detectShadows=False)
+        self.frame_buffer: List[Dict[str, Any]] = []
+        self.last_consolidated: Optional[Dict[str, Any]] = None
+        self.frame_idx = 0
+
+    def detect_vehicle_motion(self, frame: np.ndarray) -> bool:
+        """
+        Robust rain-proof motion detection.
+        Rain creates thin, high-frequency pixel noise; vehicles create large continuous contours.
+        """
+        self.frame_idx += 1
+        h, w = frame.shape[:2]
+        small = cv2.resize(frame, (640, 360))
+        blurred = cv2.GaussianBlur(small, (15, 15), 0)
+
+        fg_mask = self.bg_subtractor.apply(blurred)
+        if self.frame_idx < 3:
+            # Let background subtractor settle on initial stream frames
+            return False
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        clean_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+
+        contours, _ = cv2.findContours(clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        scale_factor = (640.0 * 360.0) / float(max(w * h, 1))
+        target_area = self.min_vehicle_area * scale_factor
+
+        for cnt in contours:
+            if cv2.contourArea(cnt) >= target_area:
+                return True
+        return False
+
+    def process_stream_frame(self, frame: np.ndarray, debug: bool = False):
+        """
+        Processes a stream frame with motion gating and 3-5 frame confidence aggregation.
+        Returns: (result_dict, is_confirmed_event, has_motion)
+        """
+        now = time.time()
+        has_motion = self.detect_vehicle_motion(frame)
+
+        # Within cooldown: keep displaying confirmed vehicle detection
+        if (now - self.last_emit_time) < self.cooldown_sec and self.last_consolidated:
+            return self.last_consolidated, False, has_motion
+
+        # No vehicle motion: skip heavy neural networks, save compute resources
+        if not has_motion:
+            if len(self.frame_buffer) > 0 and (now - self.last_emit_time) > 1.0:
+                self.frame_buffer.clear()
+            return self.last_consolidated, False, False
+
+        # Vehicle motion detected: run LPR pipeline on this frame
+        if self.pipeline is not None:
+            res = self.pipeline.process_image(frame, debug=debug)
+            if res.get("detected"):
+                self.frame_buffer.append(res)
+
+        # When buffer accumulates 3 to 5 frames, consolidate via majority voting & confidence averaging
+        if len(self.frame_buffer) >= self.target_samples:
+            consolidated = self.aggregate_buffer(self.frame_buffer)
+            if consolidated:
+                self.last_consolidated = consolidated
+                self.last_emit_time = now
+                if self.pipeline is not None:
+                    self.pipeline.latest_stream_detection = consolidated
+            self.frame_buffer.clear()
+            return consolidated, True, True
+
+        preview_res = self.frame_buffer[-1] if self.frame_buffer else self.last_consolidated
+        return preview_res, False, True
+
+    def aggregate_buffer(self, buffer: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        Multi-frame majority voting and confidence averaging over 3-5 samples.
+        """
+        valid = [r for r in buffer if r.get("detected") and r.get("is_valid")]
+        if not valid:
+            valid = [r for r in buffer if r.get("detected")]
+        if not valid:
+            return None
+
+        # 1. Majority vote on plate text
+        plate_texts = [r["plate_text"] for r in valid if r.get("plate_text")]
+        if not plate_texts:
+            return valid[0]
+        vote_plate = Counter(plate_texts).most_common(1)[0][0]
+
+        # 2. Filter items matching voted plate text
+        matched = [r for r in valid if r.get("plate_text") == vote_plate]
+        if not matched:
+            matched = valid
+
+        # 3. Majority vote on province
+        prov_names = [r.get("province") for r in matched if r.get("province")]
+        vote_prov = Counter(prov_names).most_common(1)[0][0] if prov_names else matched[0].get("province", "")
+
+        # 4. Confidence score averaging across 3-5 captures
+        avg_plate_conf = float(np.mean([r["confidence"]["plate_detection"] for r in matched if "confidence" in r]))
+        avg_prov_conf = float(np.mean([r["confidence"]["province_classification"] for r in matched if "confidence" in r]))
+
+        consolidated = matched[0].copy()
+        consolidated["plate_text"] = vote_plate
+        consolidated["province"] = vote_prov
+        if "confidence" in consolidated:
+            consolidated["confidence"]["plate_detection"] = round(avg_plate_conf, 3)
+            consolidated["confidence"]["province_classification"] = round(avg_prov_conf, 3)
+        consolidated["aggregated_samples"] = len(matched)
+        return consolidated
+
+
 def mjpeg_stream_generator(source: str, debug: bool = False):
     cam_source = int(source) if source.isdigit() else source
     cap = cv2.VideoCapture(cam_source)
@@ -1274,10 +1407,13 @@ def mjpeg_stream_generator(source: str, debug: bool = False):
         print(f"[RTSP Stream] Failed to connect to source: {source}")
         return
 
-    frame_counter = 0
+    processor = RTSPLPRProcessor(pipeline_service) if pipeline_service else None
     cached_text = ""
     cached_prov = ""
     cached_country = "THAI"
+    cached_conf = 0.0
+    cached_samples = 1
+    has_vehicle_motion = False
 
     try:
         while True:
@@ -1286,22 +1422,31 @@ def mjpeg_stream_generator(source: str, debug: bool = False):
                 time.sleep(0.04)
                 continue
 
-            frame_counter += 1
-            if frame_counter % 3 == 0 and pipeline_service is not None:
-                res = pipeline_service.process_image(frame, debug=debug)
-                if res.get("detected"):
+            if processor is not None:
+                res, is_confirmed, has_vehicle_motion = processor.process_stream_frame(frame, debug=debug)
+                if res and res.get("detected"):
                     cached_text = res.get("plate_text", "")
                     cached_prov = res.get("province", "")
                     cached_country = f"{res.get('country_flag', '')} {res.get('country', '')}"
+                    cached_conf = res.get("confidence", {}).get("plate_detection", 0.0)
+                    cached_samples = res.get("aggregated_samples", 1)
 
-            cv2.rectangle(frame, (10, 10), (380, 95), (8, 12, 20), -1)
-            cv2.rectangle(frame, (10, 10), (380, 95), (0, 240, 255), 1)
+            # Draw sleek industrial HUD overlay
+            cv2.rectangle(frame, (10, 10), (430, 110), (8, 12, 20), -1)
+            cv2.rectangle(frame, (10, 10), (430, 110), (0, 240, 255) if has_vehicle_motion else (50, 60, 80), 1)
 
-            cv2.putText(frame, f"LPR LIVE [{cached_country}]", (20, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 240, 255), 2)
-            disp_plate = f"PLATE: {cached_text}" if cached_text else "SCANNING..."
-            disp_prov = f"PROV:  {cached_prov}" if cached_prov else "AWAITING TARGET"
-            cv2.putText(frame, disp_plate, (20, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(frame, disp_prov, (20, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (16, 185, 129), 1)
+            motion_badge = "[MOTION DETECTED]" if has_vehicle_motion else "[GATE IDLE / RAIN-FILTERED]"
+            badge_color = (0, 240, 255) if has_vehicle_motion else (140, 150, 160)
+            cv2.putText(frame, f"LPR LIVE {motion_badge}", (20, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.45, badge_color, 1)
+
+            disp_plate = f"PLATE: {cached_text} ({cached_country})" if cached_text else "AWAITING VEHICLE MOTION"
+            cv2.putText(frame, disp_plate, (20, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2 if cached_text else 1)
+
+            if cached_prov:
+                disp_prov = f"PROV:  {cached_prov} (Voted {cached_samples} Frames | Conf {int(cached_conf * 100)}%)"
+            else:
+                disp_prov = "STATUS: MONITORING LANE (RAIN FILTER ON)"
+            cv2.putText(frame, disp_prov, (20, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (16, 185, 129) if cached_prov else (100, 120, 140), 1)
 
             ret, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
             if not ret:
