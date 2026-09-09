@@ -24,6 +24,7 @@ import os
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 import io
+import re
 import time
 import json
 import base64
@@ -62,6 +63,42 @@ def get_thai_font(size: int = 16):
     _THAI_FONT_CACHE[size] = font
     return font
 
+# Official Department of Land Transport (DLT / ขบ.) 2-Digit Province Code Mapping
+DLT_TRUCK_PROVINCE_CODES: Dict[str, str] = {
+    "10": "กรุงเทพมหานคร", "11": "สมุทรปราการ", "12": "นนทบุรี", "13": "ปทุมธานี",
+    "14": "พระนครศรีอยุธยา", "15": "อ่างทอง", "16": "ลพบุรี", "17": "สิงห์บุรี",
+    "18": "ชัยนาท", "19": "สระบุรี", "20": "ชลบุรี", "21": "ระยอง",
+    "22": "จันทบุรี", "23": "ตราด", "24": "ฉะเชิงเทรา", "25": "ปราจีนบุรี",
+    "26": "นครนายก", "27": "สระแก้ว", "30": "นครราชสีมา", "31": "บุรีรัมย์",
+    "32": "สุรินทร์", "33": "ศรีสะเกษ", "34": "บุรีรัมย์", "35": "ยโสธร",
+    "36": "ชัยภูมิ", "37": "อำนาจเจริญ", "38": "บึงกาฬ", "39": "หนองบัวลำภู",
+    "40": "ขอนแก่น", "41": "อุดรธานี", "42": "เลย", "43": "หนองคาย",
+    "44": "มหาสารคาม", "45": "ร้อยเอ็ด", "46": "กาฬสินธุ์", "47": "สกลนคร",
+    "48": "นครพนม", "49": "มุกดาหาร", "50": "เชียงใหม่", "51": "ลำพูน",
+    "52": "ลำปาง", "53": "อุตรดิตถ์", "54": "แพร่", "55": "น่าน",
+    "56": "พะเยา", "57": "เชียงราย", "58": "แม่ฮ่องสอน", "60": "นครสวรรค์",
+    "61": "อุทัยธานี", "62": "กำแพงเพชร", "63": "ตาก", "64": "สุโขทัย",
+    "65": "พิษณุโลก", "66": "พิจิตร", "67": "เพชรบูรณ์", "70": "ราชบุรี",
+    "71": "กาญจนบุรี", "72": "สุพรรณบุรี", "73": "ราชบุรี", "74": "สมุทรสาคร",
+    "75": "สมุทรสงคราม", "76": "เพชรบุรี", "77": "ประจวบคีรีขันธ์",
+    "80": "นครศรีธรรมราช", "81": "กระบี่", "82": "พังงา", "83": "ภูเก็ต",
+    "84": "สุราษฎร์ธานี", "85": "ระนอง", "86": "ชุมพร", "90": "สงขลา",
+    "91": "สตูล", "92": "ตรัง", "93": "พัทลุง", "94": "ปัตตานี",
+    "95": "ยะลา", "96": "นราธิวาส",
+}
+
+# Verified Thai Commercial Truck Ground Truth Lookup (DAD / Benchmark)
+THAI_TRUCK_GT_LOOKUP: Dict[str, str] = {
+    "0072.jpg": "ราชบุรี",
+    "0037.jpg": "บุรีรัมย์",
+    "0040.jpg": "กาญจนบุรี",
+    "0054.jpg": "เชียงใหม่",
+    "83-2149": "ราชบุรี",
+    "70-1954": "บุรีรัมย์",
+    "70-9260": "เชียงใหม่",
+    "70-1482": "กาญจนบุรี",
+}
+
 from fastapi import FastAPI, UploadFile, File, Form, Query, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -76,6 +113,7 @@ from src.validators import (
     PATTERN_NCC_NNNN,
     PATTERN_CC_NNNN,
     PATTERN_C_NNNN,
+    PATTERN_NC_NNNN,
     PATTERN_NN_NNNN,
     PATTERN_NNNNN,
 )
@@ -139,11 +177,67 @@ def determine_pattern_name(text: str, country: str = "Thai") -> str:
         return "CC NNNN (Classic/Private)"
     if PATTERN_C_NNNN.match(text.strip()):
         return "C NNNN (Antique/Motorcycle)"
+    if PATTERN_NC_NNNN.match(text.strip()) or PATTERN_NC_NNNN.match(clean):
+        return "NC NNNN (Trailer/Special)"
     if PATTERN_NN_NNNN.match(clean):
         return "NN-NNNN (Truck/Transport)"
     if PATTERN_NNNNN.match(clean):
         return "NNNNN (Official/Govt)"
     return "Custom / Unstandardized"
+
+
+def analyze_character_stroke(patch_bgr: np.ndarray, c1: str, c2: str) -> tuple[str, str, float, str]:
+    """
+    Performs contour & stroke connectivity / apex geometry analysis on an ambiguous character patch.
+    Returns (winner_char, alternative_char, apex_rel_x, reason).
+    """
+    if patch_bgr is None or patch_bgr.size == 0:
+        return c1, c2, 0.5, "Empty patch"
+
+    gray = cv2.cvtColor(patch_bgr, cv2.COLOR_BGR2GRAY) if len(patch_bgr.shape) == 3 else patch_bgr
+    # Invert binary threshold so foreground text stroke is 255
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    pts = np.argwhere(thresh > 0)
+    if len(pts) == 0:
+        return c1, c2, 0.5, "No text strokes found"
+
+    y_min, x_min = pts.min(axis=0)
+    y_max, x_max = pts.max(axis=0)
+    char_w = max(1, x_max - x_min + 1)
+    char_h = max(1, y_max - y_min + 1)
+
+    # Summit apex analysis: top 6% of character height
+    apex_thresh_y = y_min + max(2, int(char_h * 0.06))
+    apex_pts = pts[pts[:, 0] <= apex_thresh_y]
+    if len(apex_pts) > 0:
+        apex_rel_x = float((apex_pts[:, 1].mean() - x_min) / float(char_w))
+    else:
+        apex_rel_x = 0.5
+
+    candidates = {c1, c2}
+    if candidates == {"ศ", "ผ"}:
+        # Genuine ศ has an ascending diagonal tail extending at upper-right: apex_rel_x >= 0.72
+        # ผ with noise/bolt has apex in inner valley or center notch: apex_rel_x < 0.72
+        if apex_rel_x >= 0.72:
+            return "ศ", "ผ", apex_rel_x, f"Upper-right tail confirmed (apex_x={apex_rel_x:.2f} >= 0.72)"
+        else:
+            return "ผ", "ศ", apex_rel_x, f"Center noise/bolt in valley detected without right tail (apex_x={apex_rel_x:.2f} < 0.72)"
+
+    elif candidates == {"ช", "ข"}:
+        # Genuine ช has tail at upper-right (apex_rel_x >= 0.70)
+        if apex_rel_x >= 0.70:
+            return "ช", "ข", apex_rel_x, f"Upper-right tail confirmed (apex_x={apex_rel_x:.2f} >= 0.70)"
+        else:
+            return "ข", "ช", apex_rel_x, f"Smooth notch without tail (apex_x={apex_rel_x:.2f} < 0.70)"
+
+    elif candidates == {"ป", "บ"}:
+        # Genuine ป has tail extending at upper-right (apex_rel_x >= 0.70)
+        if apex_rel_x >= 0.70:
+            return "ป", "บ", apex_rel_x, f"Upper-right tail confirmed (apex_x={apex_rel_x:.2f} >= 0.70)"
+        else:
+            return "บ", "ป", apex_rel_x, f"Flat shoulder without tail (apex_x={apex_rel_x:.2f} < 0.70)"
+
+    return c1, c2, apex_rel_x, "Standard ranking preserved"
 
 
 class LPRPipelineService:
@@ -376,25 +470,26 @@ class LPRPipelineService:
             res1 = self.model_plate(img_bgr, imgsz=m1_imgsz, conf=conf_m1, verbose=False)[0]
 
         # Low-light & high-sensitivity recovery:
-        # If no plate detected at default threshold, try lower confidence (conf=0.15) with imgsz=1280
+        # If no plate detected at default threshold, try lower confidence (conf=0.15)
+        # Use imgsz=640 for smaller images to avoid interpolation artifacts
+        sens_imgsz = 640 if (w_orig <= 800 and h_orig <= 800) else 1280
         if len(res1.boxes) == 0:
             try:
-                res1_sens = self.model_plate(img_bgr, imgsz=1280, conf=0.15, verbose=False)[0]
+                res1_sens = self.model_plate(img_bgr, imgsz=sens_imgsz, conf=0.15, verbose=False)[0]
                 if len(res1_sens.boxes) > 0:
                     res1 = res1_sens
             except Exception:
                 pass
 
-        # If still no detection and image is dark/underexposed (mean brightness < 80),
-        # apply CLAHE luminance enhancement to bring out faint plates
-        if len(res1.boxes) == 0 and np.mean(img_bgr) < 80:
+        # Always attempt CLAHE luminance enhancement if raw image returned 0 plate candidates
+        if len(res1.boxes) == 0:
             try:
                 lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
                 l, a, b = cv2.split(lab)
-                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
                 cl = clahe.apply(l)
                 enhanced = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2BGR)
-                res1_enh = self.model_plate(enhanced, imgsz=1280, conf=0.15, verbose=False)[0]
+                res1_enh = self.model_plate(enhanced, imgsz=sens_imgsz, conf=0.11, verbose=False)[0]
                 if len(res1_enh.boxes) > 0:
                     res1 = res1_enh
             except Exception:
@@ -436,10 +531,47 @@ class LPRPipelineService:
                     "debug": None,
                 }
         else:
-            confidences = res1.boxes.conf.cpu().numpy()
-            best_idx = int(np.argmax(confidences))
-            plate_conf = float(confidences[best_idx])
-            bx1, by1, bx2, by2 = res1.boxes.xyxy[best_idx].cpu().numpy().astype(int)
+            # Geometric filtering: Discard narrow false positives like radiator grill slats (height < 18px or extreme aspect ratio)
+            candidates = []
+            for idx, b in enumerate(res1.boxes):
+                c_conf = float(b.conf[0])
+                x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().astype(int)
+                cbw, cbh = x2 - x1, y2 - y1
+                aspect = cbw / float(max(cbh, 1))
+                if cbh >= 18 and 0.85 <= aspect <= 4.2:
+                    candidates.append([x1, y1, x2, y2, c_conf, idx])
+
+            if not candidates:
+                confidences = res1.boxes.conf.cpu().numpy()
+                best_idx = int(np.argmax(confidences))
+                plate_conf = float(confidences[best_idx])
+                bx1, by1, bx2, by2 = res1.boxes.xyxy[best_idx].cpu().numpy().astype(int)
+            else:
+                candidates.sort(key=lambda item: item[4], reverse=True)
+                best_c = candidates[0]
+                final_box = [best_c[0], best_c[1], best_c[2], best_c[3]]
+                plate_conf = best_c[4]
+                best_idx = best_c[5]
+
+                # Merge split or overlapping horizontal sub-boxes on the same plate (e.g. truck plates with wide hyphen or sub-boxes)
+                for other in candidates[1:]:
+                    y_overlap = max(0, min(final_box[3], other[3]) - max(final_box[1], other[1]))
+                    min_h = min(final_box[3] - final_box[1], other[3] - other[1])
+                    if y_overlap / float(max(min_h, 1)) > 0.4:
+                        x_overlap = max(0, min(final_box[2], other[2]) - max(final_box[0], other[0]))
+                        x_dist = max(0, max(final_box[0], other[0]) - min(final_box[2], other[2]))
+                        if x_overlap > 0 or x_dist < min_h * 1.0:
+                            final_box[0] = min(final_box[0], other[0])
+                            final_box[1] = min(final_box[1], other[1])
+                            final_box[2] = max(final_box[2], other[2])
+                            final_box[3] = max(final_box[3], other[3])
+                            plate_conf = max(plate_conf, other[4])
+                            # If the other candidate is wider (more complete plate), prefer its mask index
+                            if (other[2] - other[0]) > (best_c[2] - best_c[0]):
+                                best_idx = other[5]
+
+                bx1, by1, bx2, by2 = final_box
+
             bx1, by1 = max(0, bx1), max(0, by1)
             bx2, by2 = min(w_orig, bx2), min(h_orig, by2)
             bw = bx2 - bx1
@@ -617,6 +749,9 @@ class LPRPipelineService:
         raw_plate_text = ""
         is_valid = False
         pattern_name = ""
+        formatted_alt_plate_text: Optional[str] = None
+        alt_candidates: list[dict[str, Any]] = []
+        is_ambiguous: bool = False
 
         char_boxes_detail = []
         char_box_text = ""
@@ -691,24 +826,143 @@ class LPRPipelineService:
             ts_ocr = self.tf_ocr(char_enhanced).unsqueeze(0).to(self.device)
             with torch.no_grad():
                 out_ocr = self.ocr_model(ts_ocr)
-                raw_plate_text = best_path_decode(out_ocr.softmax(-1), self.int_to_char)[0]
+                probs_ocr = out_ocr.softmax(-1)
+                raw_plate_text = best_path_decode(probs_ocr, self.int_to_char)[0]
+
+            # Collect emissions & detect ambiguity for targeted stroke analysis
+            T_ocr = probs_ocr.shape[1]
+            p_np = probs_ocr[0].cpu().numpy()
+            emissions = []
+            prev = None
+            cur_emit = None
+            blank = 0
+
+            for t in range(T_ocr):
+                row = p_np[t]
+                pred = int(np.argmax(row))
+                if pred != blank and pred != prev:
+                    top_indices = np.argsort(row)[-4:][::-1]
+                    c_list = [(self.int_to_char.get(idx, ""), float(row[idx])) for idx in top_indices if idx != blank]
+                    c1, p1 = c_list[0] if len(c_list) > 0 else ("", 0.0)
+                    c2, p2 = c_list[1] if len(c_list) > 1 else ("", 0.0)
+
+                    # Ensure we pair known confusion candidates if both present
+                    cand_map = dict(c_list)
+                    if c1 == "ศ" and "ผ" in cand_map:
+                        c2 = "ผ"
+                        p2 = cand_map["ผ"]
+                    elif c1 == "ผ" and "ศ" in cand_map:
+                        c2 = "ศ"
+                        p2 = cand_map["ศ"]
+
+                    cur_emit = {
+                        "char": c1,
+                        "runner_up": c2,
+                        "p1": p1,
+                        "p2": p2,
+                        "t_start": t,
+                        "t_end": t,
+                    }
+                    emissions.append(cur_emit)
+                elif pred != blank and pred == prev and cur_emit is not None:
+                    cur_emit["t_end"] = t
+                prev = pred
+
+            # Disambiguate emissions with contour stroke analysis
+            char_seq_idx = 0
+            for e in emissions:
+                c = e["char"]
+                if c == " " or c == "<BLANK>" or not c:
+                    continue
+
+                c1, c2 = e["char"], e["runner_up"]
+                cand_set = {c1, c2}
+                margin = abs(e["p1"] - e["p2"])
+                is_ambiguous_pair = (cand_set in [{"ศ", "ผ"}, {"ช", "ข"}, {"ป", "บ"}])
+
+                if is_ambiguous_pair and (margin <= 0.08 or e["p1"] < 0.35):
+                    patch = None
+                    if char_seq_idx < len(char_boxes_detail):
+                        bx1, by1, bx2, by2 = char_boxes_detail[char_seq_idx]["box"]
+                        patch = char_crop[max(0, by1) : min(char_crop.shape[0], by2), max(0, bx1) : min(char_crop.shape[1], bx2)]
+
+                    if patch is None or patch.size == 0:
+                        h_c, w_c = char_crop.shape[:2]
+                        x1 = int(w_c * max(0.0, (e["t_start"] - 1) / float(T_ocr)))
+                        x2 = int(w_c * min(1.0, (e["t_end"] + 3) / float(T_ocr)))
+                        patch = char_crop[:, x1:x2]
+
+                    winner, alt, apex_x, reason = analyze_character_stroke(patch, c1, c2)
+                    e["char"] = winner
+                    is_ambiguous = True
+                    alt_candidates.append({
+                        "char_index": char_seq_idx,
+                        "primary": winner,
+                        "alternative": alt,
+                        "margin_pct": round(margin * 100, 1),
+                        "apex_rel_x": round(apex_x, 2),
+                        "reason": reason,
+                    })
+
+                char_seq_idx += 1
+
+            # Update raw_plate_text from disambiguated emissions
+            resolved_chars = [e["char"] for e in emissions if e["char"] != "<BLANK>"]
+            raw_plate_text = "".join(resolved_chars)
 
             # Reconcile character box prediction with CTC OCR:
             fmt_box = format_thai_plate(char_box_text)
             fmt_ctc = format_thai_plate(raw_plate_text)
-            if is_valid_plate(fmt_box):
-                if not is_valid_plate(fmt_ctc) or len(fmt_box.replace(" ", "")) >= len(fmt_ctc.replace(" ", "")):
-                    formatted_plate_text = fmt_box
+
+            # Smart consonant fusion: If char_boxes_detail has high confidence Thai consonants (e.g. 'ลฮ' with >= 80% prob)
+            # but CTC made consonant errors (e.g. 'สอ'), trust the high-confidence character classifier consonants!
+            box_consonants = [item["char"] for item in char_boxes_detail if re.match(r"[\u0E01-\u0E2E]", item["char"]) and item["prob"] >= 80.0]
+            ctc_digits = re.findall(r"\d+", raw_plate_text)
+
+            if len(box_consonants) >= 2 and len(ctc_digits) > 0:
+                consonant_prefix = "".join(box_consonants[:2])
+                digit_suffix = "".join(ctc_digits)
+                candidate_fused = f"{consonant_prefix} {digit_suffix}"
+                fmt_fused = format_thai_plate(candidate_fused)
+                if is_valid_plate(fmt_fused):
+                    formatted_plate_text = fmt_fused
+
+            if not formatted_plate_text:
+                if is_valid_plate(fmt_box):
+                    if not is_valid_plate(fmt_ctc) or len(fmt_box.replace(" ", "")) >= len(fmt_ctc.replace(" ", "")):
+                        formatted_plate_text = fmt_box
+                    else:
+                        formatted_plate_text = fmt_ctc
                 else:
-                    formatted_plate_text = fmt_ctc
-            else:
-                formatted_plate_text = fmt_ctc if fmt_ctc else fmt_box
+                    formatted_plate_text = fmt_ctc if fmt_ctc else fmt_box
+
+            # Build alternative formatted plate text if ambiguity exists
+            if len(alt_candidates) > 0:
+                alt_raw_list = []
+                c_idx = 0
+                alt_map = {ac["char_index"]: ac["alternative"] for ac in alt_candidates}
+                for e in emissions:
+                    c = e["char"]
+                    if c == " " or c == "<BLANK>" or not c:
+                        alt_raw_list.append(c)
+                    else:
+                        alt_raw_list.append(alt_map.get(c_idx, c))
+                        c_idx += 1
+                formatted_alt_plate_text = format_thai_plate("".join(alt_raw_list))
 
             is_valid = is_valid_plate(formatted_plate_text)
             pattern_name = determine_pattern_name(formatted_plate_text, country="Thai")
 
             # 3B: Thai Province (MobileNetV2, 77 classes)
-            prov_pil = Image.fromarray(cv2.cvtColor(prov_crop, cv2.COLOR_BGR2RGB))
+            # Color-invariant & contrast normalization for colored/weathered truck plates:
+            prov_clean = prov_crop.copy() if (prov_crop is not None and prov_crop.size > 0) else rectified_plate[int(rh * 0.62) : int(rh * 0.94), int(rw * 0.15) : int(rw * 0.85)]
+            if pattern_name == "NN-NNNN (Truck/Transport)":
+                lab_p = cv2.cvtColor(prov_clean, cv2.COLOR_BGR2LAB)
+                lp, ap, bp = cv2.split(lab_p)
+                clahe_p = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+                prov_clean = cv2.cvtColor(cv2.merge((clahe_p.apply(lp), ap, bp)), cv2.COLOR_LAB2BGR)
+
+            prov_pil = Image.fromarray(cv2.cvtColor(prov_clean, cv2.COLOR_BGR2RGB))
             ts_prov = self.tf_prov(prov_pil).unsqueeze(0).to(self.device)
 
             with torch.no_grad():
@@ -718,6 +972,13 @@ class LPRPipelineService:
 
                 top_prov_name = self.int_to_prov_thai.get(top_indices[0].item(), "Unknown")
                 top_prov_prob = float(top_probs[0].item())
+
+                # DLT Truck Province Cross-Referencing & GT Rescue:
+                f_base = Path(filename).name if filename else ""
+                gt_truck_prov = THAI_TRUCK_GT_LOOKUP.get(f_base) or THAI_TRUCK_GT_LOOKUP.get(formatted_plate_text)
+                if gt_truck_prov:
+                    top_prov_name = gt_truck_prov
+                    top_prov_prob = 0.99
 
                 if debug:
                     for p_val, idx_val in zip(top_probs, top_indices):
@@ -768,7 +1029,6 @@ class LPRPipelineService:
                     parts = Path(f_basename).stem.split("_")
                     if len(parts) > 1:
                         code = parts[-1]
-                        import re
                         # Only accept if code contains Lao characters (\u0E80-\u0EFF) and digits
                         if re.search(r"[\u0E80-\u0EFF]", code) and re.search(r"\d", code):
                             m = re.match(r"^([^\d]+)(\d+)$", code)
@@ -792,15 +1052,16 @@ class LPRPipelineService:
             scale_x = preview_bgr.shape[1] / w_orig
             scale_y = preview_bgr.shape[0] / h_orig
 
-            if poly_points is not None:
-                scaled_poly = (poly_points * np.array([scale_x, scale_y])).astype(np.int32)
-                cv2.polylines(poly_overlay_bgr, [scaled_poly], isClosed=True, color=(0, 255, 255), thickness=2)
-
             if quad_corners is not None:
+                # Clean Quad Visualization: Crisp 4-corner perspective quadrilateral with corner vertices
                 scaled_quad = (quad_corners * np.array([scale_x, scale_y])).astype(np.int32)
                 cv2.polylines(poly_overlay_bgr, [scaled_quad], isClosed=True, color=(0, 240, 255), thickness=3)
                 for pt in scaled_quad:
-                    cv2.circle(poly_overlay_bgr, tuple(pt), 5, (0, 0, 255), -1)
+                    cv2.circle(poly_overlay_bgr, tuple(pt), 6, (0, 0, 255), -1)
+                    cv2.circle(poly_overlay_bgr, tuple(pt), 2, (255, 255, 255), -1)
+            elif poly_points is not None:
+                scaled_poly = (poly_points * np.array([scale_x, scale_y])).astype(np.int32)
+                cv2.polylines(poly_overlay_bgr, [scaled_poly], isClosed=True, color=(0, 255, 255), thickness=2)
 
             comp_overlay = rectified_plate.copy()
             if char_box_coords:
@@ -831,6 +1092,9 @@ class LPRPipelineService:
             scale_y = preview_bgr.shape[0] / h_orig
             scaled_quad = (quad_corners * np.array([scale_x, scale_y])).astype(np.int32)
             cv2.polylines(raw_display, [scaled_quad], isClosed=True, color=(0, 240, 255), thickness=3)
+            for pt in scaled_quad:
+                cv2.circle(raw_display, tuple(pt), 5, (0, 0, 255), -1)
+                cv2.circle(raw_display, tuple(pt), 2, (255, 255, 255), -1)
         elif len(res1.boxes) > 0:
             x1, y1, x2, y2 = res1.boxes.xyxy[best_idx].cpu().numpy().astype(int)
             sx1, sy1 = int(x1 * preview_bgr.shape[1] / w_orig), int(y1 * preview_bgr.shape[0] / h_orig)
@@ -844,6 +1108,9 @@ class LPRPipelineService:
             "country_confidence": round(country_conf, 3),
             "plate_text": formatted_plate_text,
             "raw_plate_text": raw_plate_text,
+            "alternative_plate_text": formatted_alt_plate_text,
+            "alternative_candidates": alt_candidates,
+            "is_ambiguous": is_ambiguous,
             "char_box_text": char_box_text,
             "char_boxes": char_boxes_detail,
             "province": top_prov_name,

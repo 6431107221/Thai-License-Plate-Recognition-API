@@ -77,9 +77,19 @@ def augment_crop(img_bgr: np.ndarray, aug_id: int) -> np.ndarray:
 
 
 def generate_synthetic_province(thai_name: str, font_path: Path, width=200, height=50) -> np.ndarray:
-    """Renders authentic Thai province text banner on realistic plate background."""
-    bg_val = random.randint(215, 245)
-    bg = np.full((height, width, 3), (bg_val, bg_val, bg_val), dtype=np.uint8)
+    """Renders authentic Thai province text banner on realistic plate background (white passenger & yellow commercial)."""
+    # 50% white passenger plate, 50% yellow commercial truck plate
+    is_yellow_truck = random.random() < 0.50
+    if is_yellow_truck:
+        # Commercial yellow truck plate background (BGR: yellow/mustard/amber)
+        b = random.randint(35, 95)
+        g = random.randint(170, 225)
+        r = random.randint(215, 255)
+        bg = np.full((height, width, 3), (b, g, r), dtype=np.uint8)
+    else:
+        bg_val = random.randint(215, 245)
+        bg = np.full((height, width, 3), (bg_val, bg_val, bg_val), dtype=np.uint8)
+
     noise = np.random.normal(0, 4, (height, width, 3)).astype(np.int16)
     bg = np.clip(bg.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 

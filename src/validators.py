@@ -13,6 +13,7 @@ DIGIT = r"\d"
 PATTERN_NCC_NNNN = re.compile(rf"^{DIGIT}{THAI_CONSONANTS}{{2}}\s?{DIGIT}{{1,4}}$") # e.g., 1กข 1234 or 1กข1234
 PATTERN_CC_NNNN  = re.compile(rf"^{THAI_CONSONANTS}{{2}}\s?{DIGIT}{{1,4}}$")        # e.g., กข 1234 or ฮร 9960
 PATTERN_C_NNNN   = re.compile(rf"^{THAI_CONSONANTS}[\s-]?{DIGIT}{{1,4}}$")             # e.g., ก 1234 or ส-5887
+PATTERN_NC_NNNN  = re.compile(rf"^{DIGIT}{THAI_CONSONANTS}\s*[-]?\s*{DIGIT}{{1,4}}$")    # e.g., 5ศ - 7856 or 5ศ 7856 (Trailer/Machinery/Special)
 PATTERN_NN_NNNN  = re.compile(rf"^{DIGIT}{{2}}-{DIGIT}{{4}}$")                      # e.g., 82-6990 (truck / trailer)
 PATTERN_NNNNN    = re.compile(rf"^{DIGIT}{{4,6}}$")                                 # e.g., 12345 (police / official)
 
@@ -26,12 +27,13 @@ class PlateLabelValidator(BaseModel):
         is_ncc = PATTERN_NCC_NNNN.match(v_stripped)
         is_cc  = PATTERN_CC_NNNN.match(v_stripped)
         is_c   = PATTERN_C_NNNN.match(v_stripped)
+        is_nc  = PATTERN_NC_NNNN.match(v_stripped)
         is_nn  = PATTERN_NN_NNNN.match(v_stripped)
         is_num = PATTERN_NNNNN.match(v_stripped)
         
-        if not (is_ncc or is_cc or is_c or is_nn or is_num):
+        if not (is_ncc or is_cc or is_c or is_nc or is_nn or is_num):
             raise ValueError(
-                f"Invalid plate format: '{v}'. Must match NCC NNNN, CC NNNN, C NNNN, NN-NNNN, or NNNNN."
+                f"Invalid plate format: '{v}'. Must match NCC NNNN, CC NNNN, C NNNN, NC NNNN, NN-NNNN, or NNNNN."
             )
         
         return v
@@ -75,6 +77,14 @@ def format_thai_plate(text: str) -> str:
     if m:
         sep = "-" if "-" in s else " "
         m_grp = re.match(rf"^({THAI_CONSONANTS})[\s-]?({DIGIT}{{1,4}})$", s)
+        if m_grp:
+            return f"{m_grp.group(1)}{sep}{m_grp.group(2)}"
+
+    # 3.5. Pattern: NC NNNN or NC-NNNN (1 digit, 1 Thai consonant, 1-4 digits, e.g. 5ศ - 7856)
+    m = PATTERN_NC_NNNN.match(clean)
+    if m:
+        sep = " - " if "-" in s else " "
+        m_grp = re.match(rf"^({DIGIT}{THAI_CONSONANTS})[\s-]?({DIGIT}{{1,4}})$", clean)
         if m_grp:
             return f"{m_grp.group(1)}{sep}{m_grp.group(2)}"
 

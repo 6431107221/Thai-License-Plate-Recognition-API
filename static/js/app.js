@@ -73,6 +73,9 @@
   const resultBadge = document.getElementById('resultBadge');
   const patternText = document.getElementById('patternText');
   const confProvProb = document.getElementById('confProvProb');
+  const altPlateContainer = document.getElementById('altPlateContainer');
+  const altPlateText = document.getElementById('altPlateText');
+  const altPlateReason = document.getElementById('altPlateReason');
 
   // Debug Drawer
   const debugDrawer = document.getElementById('debugDrawer');
@@ -335,6 +338,7 @@
       if (confPlate) confPlate.textContent = '--';
       if (confCharProv) confCharProv.textContent = '--';
       if (confProvProb) confProvProb.textContent = '--';
+      if (altPlateContainer) altPlateContainer.style.display = 'none';
       if (debugDrawer) debugDrawer.classList.remove('active');
       return;
     }
@@ -343,7 +347,6 @@
     const badgeCountry = document.getElementById('badgeCountry');
     const countryMeta = document.getElementById('countryMeta');
     const layoutMeta = document.getElementById('layoutMeta');
-    const confCharProv = document.getElementById('confCharProv');
     const labelCharBox = document.getElementById('labelCharBox');
     const labelProvBox = document.getElementById('labelProvBox');
 
@@ -414,6 +417,24 @@
 
     patternText.textContent = res.pattern_name || '--';
     confProvProb.textContent = `${(res.confidence.province_classification * 100).toFixed(1)}%`;
+
+    // Render Alternative Candidate Pill
+    if (altPlateContainer) {
+      if (res.is_ambiguous && res.alternative_plate_text) {
+        altPlateContainer.style.display = 'flex';
+        if (altPlateText) altPlateText.textContent = res.alternative_plate_text;
+        if (altPlateReason) {
+          const c0 = (res.alternative_candidates && res.alternative_candidates.length > 0) ? res.alternative_candidates[0] : null;
+          if (c0) {
+            altPlateReason.textContent = `⚠️ Noise disambiguated: '${c0.primary}' over '${c0.alternative}' (${c0.margin_pct}% margin)`;
+          } else {
+            altPlateReason.textContent = '⚠️ Close-margin alternative candidate';
+          }
+        }
+      } else {
+        altPlateContainer.style.display = 'none';
+      }
+    }
 
     // Render Debug Drawer
     renderDebugDrawer(res);

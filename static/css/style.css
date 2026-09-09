@@ -704,6 +704,43 @@ input:checked + .slider:before {
   border: 1px solid rgba(16, 185, 129, 0.4);
 }
 
+.alt-plate-pill {
+  margin-top: 6px;
+  padding: 6px 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px dashed rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  max-width: 95%;
+  animation: fadeIn 0.3s ease;
+}
+
+.alt-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #f59e0b;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+.alt-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fef3c7;
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+}
+
+.alt-reason {
+  font-size: 10px;
+  color: #fbbf24;
+  line-height: 1.2;
+}
+
 /* Debug Details Drawer */
 .debug-drawer {
   background: rgba(15, 23, 42, 0.95);

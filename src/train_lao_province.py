@@ -35,7 +35,7 @@ from src.preprocess import get_prov_transforms
 
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
-DATA_DIR = PROJECT_ROOT / "datasets" / "lao_province_crops"
+DATA_DIR = PROJECT_ROOT / "datasets" / "Lao" / "lao_province_crops"
 PROV_MAP_PATH = PROJECT_ROOT / "weights" / "province_map_lao.json"
 WEIGHTS_DIR = PROJECT_ROOT / "weights"
 MODEL_SAVE_PATH = WEIGHTS_DIR / "province_model_lao.pth"

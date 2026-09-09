@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
   
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=2">
 </head>
 <body>
 
@@ -116,6 +116,9 @@
             </button>
             <button class="btn-sample" id="btnSample0002" type="button" data-sample="/static/samples/0002.jpg" data-name="0002.jpg" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fbbf24; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
               Plate 0002 (82-6990)
+            </button>
+            <button class="btn-sample" id="btnSample0527" type="button" data-sample="/static/samples/0527.jpg" data-name="0527.jpg" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+              Plate 0527 (ผว 7697 / Noise)
             </button>
           </div>
 
@@ -267,6 +270,12 @@
                 <div class="result-plate-text" id="resultPlate">--</div>
                 <div class="result-province-text" id="resultProvince">--</div>
                 <span class="result-format-badge" id="resultBadge">STANDARDIZED</span>
+                
+                <div class="alt-plate-pill" id="altPlateContainer" style="display: none;">
+                  <span class="alt-badge">ALTERNATIVE CANDIDATE</span>
+                  <span class="alt-val" id="altPlateText">--</span>
+                  <span class="alt-reason" id="altPlateReason">--</span>
+                </div>
               </div>
 
               <div class="stage-footer">
@@ -367,6 +376,6 @@
   </main>
 
   <!-- Client-side Application Script -->
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=3"></script>
 </body>
 </html>
