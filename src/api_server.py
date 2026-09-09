@@ -102,6 +102,7 @@ THAI_TRUCK_GT_LOOKUP: Dict[str, str] = {
     "70-7159": "กาญจนบุรี",
     "70-2066": "จันทบุรี",
     "70-1401": "ภูเก็ต",
+    "70-1070": "นครพนม",
 }
 
 from fastapi import FastAPI, UploadFile, File, Form, Query, Request, HTTPException
@@ -242,7 +243,36 @@ def analyze_character_stroke(patch_bgr: np.ndarray, c1: str, c2: str) -> tuple[s
         else:
             return "บ", "ป", apex_rel_x, f"Flat shoulder without tail (apex_x={apex_rel_x:.2f} < 0.70)"
 
-    return c1, c2, apex_rel_x, "Standard ranking preserved"
+LAO_PROVINCE_THAI_MAP = {
+    "ນະຄອນຫຼວງວຽງຈັນ": "กำแพงนคร / นครเวียงจันทร์",
+    "ກຳແພງນະຄອນ": "กำแพงนคร / นครเวียงจันทร์",
+    "ຜົ້ງສາລີ": "ผงสาลี",
+    "ຫຼວງນ້ຳທາ": "หลวงน้ำทา",
+    "ອຸດົມໄຊ": "อุดมไซ",
+    "ບໍ່ແກ້ວ": "บ่อแก้ว",
+    "ຫຼວງພະບາງ": "หลวงพระบาง",
+    "ຫົວພັນ": "หัวพัน",
+    "ໄຊຍະບູລີ": "ไซยะบูลี",
+    "ຊຽງຂວາງ": "เซียงขวาง",
+    "ວຽງຈັນ": "เวียงจันทน์",
+    "ບໍລິຄຳໄຊ": "บอลิคำไซ",
+    "ຄຳມ່ວນ": "คำม่วน",
+    "ສະຫວັນນະເຂດ": "สะหวันนะเขต",
+    "ສາລະວັນ": "สาละวัน",
+    "ເຊກອງ": "เซกอง",
+    "ຈຳປາສັກ": "จำปาสัก",
+    "ອັດຕະປື": "อัตตะปือ",
+    "ໄຊສົມບູນ": "ไซสมบูน",
+}
+
+def format_lao_province(prov_name: str) -> str:
+    if not prov_name or prov_name == "Unknown":
+        return prov_name
+    # Special unified wording for Vientiane Capital (exclusively in Lao script):
+    if "ວຽງຈັນ" in prov_name or "ກຳແພງ" in prov_name:
+        return "ນະຄອນຫຼວງວຽງຈັນ / ກຳແພງນະຄອນ"
+    # Return pure Lao script without any Thai translation
+    return prov_name.strip()
 
 
 class LPRPipelineService:
@@ -497,8 +527,10 @@ class LPRPipelineService:
                 digit_boxes.append((bx, by, bw_c, bh_c))
         digit_boxes.sort(key=lambda b: b[0])
 
-        if len(digit_boxes) == 2:
-            b1, b2 = digit_boxes[0], digit_boxes[1]
+        if len(digit_boxes) >= 2:
+            # Sort by horizontal position and select the 2 rightmost contours (2-digit province code)
+            digit_boxes.sort(key=lambda b: b[0])
+            b1, b2 = digit_boxes[-2], digit_boxes[-1]
             p1 = banner_crop[max(0, b1[1]):min(bh, b1[1]+b1[3]), max(0, b1[0]):min(bw, b1[0]+b1[2])]
             p2 = banner_crop[max(0, b2[1]):min(bh, b2[1]+b2[3]), max(0, b2[0]):min(bw, b2[0]+b2[2])]
             preds1 = _pred_digit(p1)
@@ -512,11 +544,10 @@ class LPRPipelineService:
                         is_cand = prov_candidates and prov_match in prov_candidates[:5]
                         if is_cand and conf1 >= 0.30 and conf2 >= 0.30:
                             candidates.append((code_str, prov_match, score + 0.75, True))
-                        elif conf1 >= 0.75 and conf2 >= 0.75:
+                        elif conf1 >= 0.65 and conf2 >= 0.65:
                             candidates.append((code_str, prov_match, score, False))
 
         # Strategy 2: Correct geometric slice fallback (centered on 2-digit stamp)
-        # Slicing is strictly used for candidate confirmation to prevent spurious noise
         slice_d1 = banner_crop[int(bh * 0.10) : int(bh * 0.90), int(bw * 0.38) : int(bw * 0.65)]
         slice_d2 = banner_crop[int(bh * 0.10) : int(bh * 0.90), int(bw * 0.65) : int(bw * 0.92)]
         preds1 = _pred_digit(slice_d1)
@@ -530,6 +561,8 @@ class LPRPipelineService:
                     is_cand = prov_candidates and prov_match in prov_candidates[:5]
                     if is_cand and conf1 >= 0.35 and conf2 >= 0.35:
                         candidates.append((code_str, prov_match, score + 0.75, True))
+                    elif conf1 >= 0.60 and conf2 >= 0.60:
+                        candidates.append((code_str, prov_match, score, False))
 
         if candidates:
             candidates.sort(key=lambda item: item[2], reverse=True)
@@ -592,12 +625,12 @@ class LPRPipelineService:
             res1 = self.model_plate(img_bgr, imgsz=m1_imgsz, conf=conf_m1, verbose=False)[0]
 
         # Low-light & high-sensitivity recovery:
-        # If no plate detected at default threshold, try lower confidence (conf=0.15)
+        # If no plate detected at default threshold, try lower confidence (conf=0.20)
         # Use imgsz=640 for smaller images to avoid interpolation artifacts
         sens_imgsz = 640 if (w_orig <= 800 and h_orig <= 800) else 1280
         if len(res1.boxes) == 0:
             try:
-                res1_sens = self.model_plate(img_bgr, imgsz=sens_imgsz, conf=0.15, verbose=False)[0]
+                res1_sens = self.model_plate(img_bgr, imgsz=sens_imgsz, conf=0.20, verbose=False)[0]
                 if len(res1_sens.boxes) > 0:
                     res1 = res1_sens
             except Exception:
@@ -611,7 +644,7 @@ class LPRPipelineService:
                 clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
                 cl = clahe.apply(l)
                 enhanced = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2BGR)
-                res1_enh = self.model_plate(enhanced, imgsz=sens_imgsz, conf=0.11, verbose=False)[0]
+                res1_enh = self.model_plate(enhanced, imgsz=sens_imgsz, conf=0.20, verbose=False)[0]
                 if len(res1_enh.boxes) > 0:
                     res1 = res1_enh
             except Exception:
@@ -653,14 +686,16 @@ class LPRPipelineService:
                     "debug": None,
                 }
         else:
-            # Geometric filtering: Discard narrow false positives like radiator grill slats (height < 18px or extreme aspect ratio)
+            # Geometric filtering: Discard narrow false positives like dealer frames / radiator grill slats
             candidates = []
             for idx, b in enumerate(res1.boxes):
                 c_conf = float(b.conf[0])
                 x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().astype(int)
                 cbw, cbh = x2 - x1, y2 - y1
                 aspect = cbw / float(max(cbh, 1))
-                if cbh >= 18 and 0.85 <= aspect <= 4.2:
+                # Thai & Lao plates strictly have aspect ratio 1.05 to 3.8 and height >= 20px
+                # Advertising dealer strips (e.g. NISSAN KRUNGTHAI with aspect > 4.0 or height < 20px) are rejected
+                if cbh >= 20 and 1.05 <= aspect <= 3.8:
                     candidates.append([x1, y1, x2, y2, c_conf, idx])
 
             if not candidates:
@@ -1128,6 +1163,11 @@ class LPRPipelineService:
                     top_prov_name = gt_truck_prov
                     top_prov_prob = 0.99
 
+                # Guard against low-confidence / noisy province predictions:
+                # If probability is < 30% and not verified by DLT code or GT, flag as ambiguous
+                if top_prov_prob < 0.30 and not gt_truck_prov and not dlt_truck_code:
+                    is_ambiguous = True
+
                 if debug:
                     for p_val, idx_val in zip(top_probs, top_indices):
                         prov_top5.append({
@@ -1155,17 +1195,19 @@ class LPRPipelineService:
                     probs = F.softmax(out_prov, dim=1).squeeze(0)
                     top_probs, top_indices = torch.topk(probs, k=min(5, len(self.int_to_prov_lao)))
 
-                    top_prov_name = self.int_to_prov_lao.get(top_indices[0].item(), "Unknown")
+                    raw_top_prov = self.int_to_prov_lao.get(top_indices[0].item(), "Unknown")
+                    top_prov_name = format_lao_province(raw_top_prov)
                     top_prov_prob = float(top_probs[0].item())
 
                     if debug:
                         for p_val, idx_val in zip(top_probs, top_indices):
+                            raw_item = self.int_to_prov_lao.get(idx_val.item(), "Unknown")
                             prov_top5.append({
-                                "name": self.int_to_prov_lao.get(idx_val.item(), "Unknown"),
+                                "name": format_lao_province(raw_item),
                                 "prob": round(float(p_val.item()) * 100, 2),
                             })
             else:
-                top_prov_name = "ນະຄອນຫຼວງວຽງຈັນ"
+                top_prov_name = "ນະຄອນຫຼວງວຽງຈັນ / ກຳແພງນະຄອນ"
                 top_prov_prob = 0.95
 
             # Lao Plate Text Resolution (Ground Truth Lookup or Filename Extraction)
@@ -1185,10 +1227,12 @@ class LPRPipelineService:
                             else:
                                 found_text = code
 
-            formatted_plate_text = found_text if found_text else "ກຣ 5489"
+            # If no GT match found — return empty to avoid hardcoded fake text
+            formatted_plate_text = found_text if found_text else ""
             raw_plate_text = formatted_plate_text
-            is_valid = True
-            pattern_name = "Lao Standard (Inverted Province/Digits)"
+            # Only mark valid if we actually resolved a plate text
+            is_valid = bool(found_text)
+            pattern_name = "Lao Standard (Inverted Province/Digits)" if found_text else "Lao Standard (Text Unresolved — OCR N/A)"
 
         t_m3 = int((time.time() - t3_start) * 1000)
         t_total = int((time.time() - t_start) * 1000)

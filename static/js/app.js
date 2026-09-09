@@ -22,7 +22,9 @@
     currentIndex: 0,
     isStreaming: false,
     streamPollTimer: null,
+    lastUploadedFiles: null, // retained for debug re-upload when toggle is turned ON after upload
   };
+
 
   // --- DOM Elements ---
   const tabUpload = document.getElementById('tabUpload');
@@ -97,6 +99,10 @@
     setupDebugToggle();
     setupDropzone();
     setupRTSPStream();
+    // Sync debug state from checkbox on page load (in case browser restores checked state)
+    if (debugToggle) {
+      state.isDebug = debugToggle.checked;
+    }
   }
 
   // --- Mode Switching ---
@@ -121,17 +127,28 @@
 
   // --- Debug Mode Toggle ---
   function setupDebugToggle() {
-    debugToggle.addEventListener('change', (e) => {
+    debugToggle.addEventListener('change', async (e) => {
       state.isDebug = e.target.checked;
       console.log(`[Debug Mode] Toggled: ${state.isDebug ? 'ON' : 'OFF'}`);
 
-      // Re-render current detection drawer state
       const current = state.batchResults[state.currentIndex];
+
+      // If debug just turned ON and current result has no debug payload, re-process with debug=true
+      if (state.isDebug && current && !current.debug && state.lastUploadedFiles && state.lastUploadedFiles.length > 0) {
+        console.log('[Debug Mode] Re-uploading with debug=true to generate overlays...');
+        metaStatus.textContent = 'Re-processing (Debug ON)...';
+        metaStatus.style.color = 'var(--accent-amber)';
+        await uploadImageFiles(state.lastUploadedFiles);
+        return;
+      }
+
+      // Otherwise just re-render drawer with available data
       if (current) {
         renderDebugDrawer(current);
       }
     });
   }
+
 
   // --- Drag & Drop Setup ---
   function setupDropzone() {
@@ -187,11 +204,14 @@
     const isVideo = files[0].type.startsWith('video/') || files[0].name.match(/\.(mp4|mov|avi|mkv)$/i);
 
     if (isVideo) {
+      state.lastUploadedFiles = null; // videos don't support debug re-upload
       await uploadVideoFile(files[0]);
     } else {
+      state.lastUploadedFiles = files; // save for debug re-upload
       await uploadImageFiles(files);
     }
   }
+
 
   // Upload Images (Batch or Single)
   async function uploadImageFiles(files) {
@@ -403,7 +423,9 @@
 
     // Stage 3: Model 3
     timeM3.textContent = `${res.timing.m3_ms} ms`;
-    resultPlate.textContent = res.plate_text || '--';
+    // Show '--' when Lao plate text wasn't resolved (empty string from server)
+    const plateDisplay = (res.plate_text && res.plate_text.trim()) ? res.plate_text : '--';
+    resultPlate.textContent = plateDisplay;
     resultProvince.textContent = res.province || '--';
 
     if (res.is_valid) {

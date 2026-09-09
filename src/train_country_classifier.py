@@ -55,14 +55,22 @@ def get_country_data():
         if d.exists():
             thai_files.extend([p for p in d.glob("*") if p.suffix.lower() in exts and p.stat().st_size > 500])
 
-    # 2. Collect Lao crops
-    lao_dir = PROJECT_ROOT / "datasets" / "lao-plate-dataset" / "images"
-    lao_files = [p for p in lao_dir.glob("*.jpg") if p.stat().st_size > 500]
+    # 2. Collect Diverse Lao crops (Roboflow in-the-wild vehicle crops + toll distinct images)
+    lao_files = []
+    lao_wild_dir = PROJECT_ROOT / "datasets" / "Lao" / "lao_plate_crops"
+    if lao_wild_dir.exists():
+        lao_files.extend([p for p in lao_wild_dir.glob("*.jpg") if p.stat().st_size > 300])
 
-    print(f"Discovered {len(thai_files)} Thai crops and {len(lao_files)} Lao crops.")
+    lao_distinct_dir = PROJECT_ROOT / "datasets" / "Lao" / "lao-plate-dataset" / "distinct_images"
+    if lao_distinct_dir.exists():
+        lao_distinct_all = [p for p in lao_distinct_dir.glob("*.jpg") if p.stat().st_size > 500]
+        random.seed(42)
+        lao_files.extend(random.sample(lao_distinct_all, min(1200, len(lao_distinct_all))))
+
+    print(f"Discovered {len(thai_files)} Thai crops and {len(lao_files)} diverse Lao crops.")
 
     # Balance datasets
-    n_samples = min(len(thai_files), 2500)
+    n_samples = min(len(thai_files), len(lao_files), 3000)
     random.seed(42)
     thai_sampled = random.sample(thai_files, n_samples)
     lao_sampled = random.sample(lao_files, n_samples)
@@ -84,8 +92,8 @@ def train_country_classifier(epochs=10, batch_size=32, lr=1e-3):
 
     train_tf = transforms.Compose([
         transforms.Resize((128, 256)),
-        transforms.RandomHorizontalFlip(p=0.1),
-        transforms.ColorJitter(brightness=0.3, contrast=0.3),
+        transforms.RandomAffine(degrees=5, translate=(0.04, 0.04), scale=(0.95, 1.05)),
+        transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
