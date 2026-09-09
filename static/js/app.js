@@ -76,6 +76,9 @@
   const altPlateContainer = document.getElementById('altPlateContainer');
   const altPlateText = document.getElementById('altPlateText');
   const altPlateReason = document.getElementById('altPlateReason');
+  const dltTruckContainer = document.getElementById('dltTruckContainer');
+  const dltTruckCode = document.getElementById('dltTruckCode');
+  const dltTruckProvince = document.getElementById('dltTruckProvince');
 
   // Debug Drawer
   const debugDrawer = document.getElementById('debugDrawer');
@@ -433,6 +436,17 @@
         }
       } else {
         altPlateContainer.style.display = 'none';
+      }
+    }
+
+    // Render DLT Truck Code Badge
+    if (dltTruckContainer) {
+      if (res.dlt_truck_code && res.dlt_truck_province) {
+        dltTruckContainer.style.display = 'flex';
+        if (dltTruckCode) dltTruckCode.textContent = res.dlt_truck_code;
+        if (dltTruckProvince) dltTruckProvince.textContent = res.dlt_truck_province;
+      } else {
+        dltTruckContainer.style.display = 'none';
       }
     }
 

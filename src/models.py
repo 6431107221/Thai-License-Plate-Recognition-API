@@ -89,6 +89,24 @@ class ResNetProvinceClassifier(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+
+class DigitClassifier(nn.Module):
+    """
+    Dedicated 10-Class Digit Classifier (0-9) for DLT Truck Province Banner Codes.
+    Trained exclusively on real plate digit crops to prevent Thai character confusion.
+    """
+    def __init__(self, n_classes=10, pretrained=True):
+        super().__init__()
+        weights = models.MobileNet_V2_Weights.IMAGENET1K_V2 if pretrained else None
+        self.model = models.mobilenet_v2(weights=weights)
+        self.model.classifier = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(self.model.last_channel, n_classes)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
 # --- Utilities ---
 
 def best_path_decode(log_probs, int_to_char, blank=0):

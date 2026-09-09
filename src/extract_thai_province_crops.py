@@ -16,6 +16,7 @@ Features:
 """
 
 import os
+import re
 import json
 import yaml
 import shutil
@@ -215,6 +216,9 @@ def extract_from_roboflow(abbr_map, metadata_rows):
     print(f"Extracted {extracted_bboxes} clean bboxes (Skipped {skipped_polygons} non-rectangular polygons)")
 
 
+GT_UNIFIED_CSV = PROJECT_ROOT / "output" / "ground_truth_crops" / "ground_truth_unified.csv"
+
+
 def extract_from_gt_province(name_to_id, metadata_rows):
     if not GT_PROV_CSV.exists():
         print(f"[Warning] {GT_PROV_CSV} not found.")
@@ -228,6 +232,17 @@ def extract_from_gt_province(name_to_id, metadata_rows):
 
     np.random.seed(42)
 
+    # Load unified CSV to detect truck plates
+    unified_truck_map = {}
+    if GT_UNIFIED_CSV.exists():
+        df_u = pd.read_csv(GT_UNIFIED_CSV)
+        for _, urow in df_u.iterrows():
+            p_img = str(urow.get("province_image", "")).strip()
+            gt_p = str(urow.get("gt_plate", "")).strip()
+            if p_img and gt_p:
+                unified_truck_map[Path(p_img).name] = bool(re.match(r"^\d\d-\d{4}", gt_p))
+
+    truck_aug_count = 0
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="GT Province Crops"):
         img_rel = row.get("image")
         thai_name = row.get("gt_province")
@@ -269,15 +284,41 @@ def extract_from_gt_province(name_to_id, metadata_rows):
             "height": img.shape[0],
         })
 
+        # Real Yellow Truck Plate Duplication & Augmentation:
+        # If this crop belongs to a truck plate (NN-NNNN) or has yellow tint, duplicate 5x into train split
+        is_truck = unified_truck_map.get(Path(img_rel).name, False)
+        # Check yellow color characteristics (high red/green, lower blue)
+        if not is_truck and img.shape[0] >= 10 and img.shape[1] >= 20:
+            mean_b, mean_g, mean_r = np.mean(img, axis=(0, 1))
+            if mean_r > 120 and mean_g > 110 and mean_b < mean_r * 0.70:
+                is_truck = True
 
-def balance_minority_provinces(prov_map, target_min=100):
-    """Boosts any province with < target_min training samples using augmentation & synthetic rendering."""
-    print(f"\nBalancing minority classes in train split (target minimum: {target_min} images/province)...")
+        if is_truck:
+            train_class_folder = OUTPUT_DIR / "train" / folder_name
+            train_class_folder.mkdir(parents=True, exist_ok=True)
+            for dup_idx in range(5):
+                aug_truck = augment_real_province_crop(img, dup_idx)
+                aug_fn = f"aug_truck_{dup_idx}_{crop_filename}"
+                cv2.imwrite(str(train_class_folder / aug_fn), aug_truck)
+                truck_aug_count += 1
+
+    print(f"Generated {truck_aug_count} dedicated real yellow truck plate augmentations (5x duplication).")
+
+
+def balance_minority_provinces(prov_map, target_min=120):
+    """
+    Boosts minority classes using authentic real-crop augmentations.
+    Target: >= 160 samples for truck confusion candidates (บุรีรัมย์, จันทบุรี, ภูเก็ต, กาญจนบุรี, นนทบุรี),
+    and >= target_min (120) samples for all other provinces.
+    """
+    TRUCK_FOCUS_PROVINCES = {"บุรีรัมย์", "จันทบุรี", "ภูเก็ต", "กาญจนบุรี", "นนทบุรี", "เชียงใหม่", "ราชบุรี"}
+    print(f"\nBalancing minority classes in train split (default target: {target_min}, truck focus: 160)...")
     train_dir = OUTPUT_DIR / "train"
     augmented_count = 0
 
     for pid in range(len(prov_map)):
         thai_name = prov_map[str(pid)]
+        min_needed = 160 if thai_name in TRUCK_FOCUS_PROVINCES else target_min
         folder_name = f"{pid:02d}_{thai_name}"
         class_folder = train_dir / folder_name
         class_folder.mkdir(parents=True, exist_ok=True)
@@ -295,8 +336,8 @@ def balance_minority_provinces(prov_map, target_min=100):
 
         n_exist = len(existing_imgs)
 
-        if n_exist < target_min and n_exist > 0:
-            needed = target_min - n_exist
+        if n_exist < min_needed and n_exist > 0:
+            needed = min_needed - n_exist
             for aug_i in range(needed):
                 src_p = random.choice(existing_imgs)
                 src_im = cv2.imread(str(src_p))
@@ -311,6 +352,7 @@ def balance_minority_provinces(prov_map, target_min=100):
                 augmented_count += 1
 
     print(f"Generated {augmented_count} purely real-augmented training crops across minority provinces.")
+
 
 
 def main():
